@@ -1,0 +1,63 @@
+# ───────── macOS system files ─────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Thumbnails and trash
+.Spotlight-V100
+.Trashes
+
+# ───────── Node & Express ─────────
+# Node modules
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+coverage/
+tmp/
+temp/
+
+# TypeScript build output
+*.tsbuildinfo
+
+# ───────── Environment & secrets ─────────
+.env
+.env.*
+!.env.example
+
+# ───────── Logs & debug ─────────
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ───────── OS & IDE junk ─────────
+# macOS metadata (repeated here to be safe)
+.DS_Store
+.fseventsd
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ───────── Lock files (optional) ─────────
+# Uncomment if you want to avoid committing lock files
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# ───────── Misc ─────────
+# If you generate SVGs or images dynamically, ignore them if they don't belong in source control
+*.log
+*.pid
+*.seed
+*.tgz
+
+# Local test output
+test-results/
+
