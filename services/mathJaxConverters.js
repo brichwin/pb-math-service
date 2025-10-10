@@ -1,36 +1,46 @@
 // node >=18
 
-const MathJax = require('mathjax');
 const { toBool, toNum } = require('../utils');
 
-// Store the initialization promise
-const mathJaxReady = MathJax.init({
+const CoreV3ish = [
+  // mirrors MathJax v3's AllPackages (practical subset)
+  'ams', 'boldsymbol', 'bbox', 'braket', 'cancel',
+  'color', 'colorv2', 'enclose', 'html', 'mathtools', 'newcommand',
+  'noundefined', 'noerrors', 'setoptions', 'tagformat',
+  'textmacros', 'unicode', 'upgreek'
+];
+
+// Add the extras you want:
+const WantedPackages = [...new Set([...CoreV3ish, 'mhchem', 'physics'])];
+
+global.MathJax ={
   loader: {
+    paths: { mathjax: '@mathjax/src/bundle' },
+    require: require,
     load: [
-      'input/tex',
-      'input/mml',
-      'input/asciimath',
-      'output/svg',
-      'adaptors/liteDOM',
-      // TeX extensions (rough equivalent of MathJax3's AllPackages + mhchem, physics)
-      '[tex]/physics'
+      'input/tex', 'input/mml', 'input/asciimath',
+      'output/svg', 'adaptors/liteDOM',
+      // Load the TeX extensions as components (prefixed form):
+      ...WantedPackages.map(p => `[tex]/${p}`)
     ]
   },
-  startup: {
-    typeset: false
+  startup: { typeset: false },
+  tex: {
+    // enable the packages in the TeX input jax
+    packages: { '[+]': WantedPackages },
+    inlineMath: [['$', '$'], ['\\(', '\\)']],
+    displayMath: [['$$', '$$'], ['\\[', '\\]']]
   },
-    tex: {
-    // Add all loaded TeX packages to the processing list
-    packages: {
-      '[+]': [
-        'physics'
-      ]
-    }
-  },
-  svg: {
-    fontCache: 'none'
+  svg: { 
+    fontCache: 'none',
+    font: 'mathjax-newcm'
   }
-}).then(() => {
+};
+
+// Load the startup component and wait for it
+require('@mathjax/src/bundle/startup.js');
+
+const mathJaxReady = MathJax.startup.promise.then(() => {
   console.log('✓ MathJax initialized successfully');
 }).catch((err) => {
   console.error('✗ MathJax initialization error:', err.message);
@@ -215,6 +225,8 @@ const mmlFromMML = async (mathml) => {
  */
 const svgFromTeX = async (tex, options, fgColor) => {
   console.log('svgFromTeX called with tex:', tex, 'options:', JSON.stringify(options), 'fgColor:', fgColor);
+  console.log('keys:', Object.keys(MathJax));
+
   await mathJaxReady; 
   console.log('MathJax startup promise resolved');
   const svgNode = await MathJax.tex2svgPromise(tex, options);
@@ -308,12 +320,30 @@ const buildMathConversionOptions = (query = {}) => {
   return options;
 }
 
+const getMathJaxInfo = () => {
+  const mj = global.MathJax || {};
+  const version = mj.version || 'unknown';
+
+  const configured =
+    (mj.config && mj.config.tex && (
+      Array.isArray(mj.config.tex.packages)
+        ? mj.config.tex.packages
+        : mj.config.tex.packages?.['[+]']
+    )) || [];
+
+  const packages = configured.length ? configured : [];
+
+  return { version, packages };
+}
+
 module.exports = {
+  mathJaxReady,
   buildMathConversionOptions,
   mmlFromTeX,
   mmlFromAM,
   mmlFromMML,
   svgFromTeX,
   svgFromAM,
-  svgFromMathML
+  svgFromMathML,
+  getMathJaxInfo
 };

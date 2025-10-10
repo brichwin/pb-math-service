@@ -3,6 +3,7 @@
 const app = require('../app');
 const http = require('http');
 const config = require('../config');
+const { mathJaxReady, getMathJaxInfo } = require('../services/mathJaxConverters'); 
 
 const port = config.port;
 app.set('port', port);
@@ -22,9 +23,36 @@ server.on('connection', (conn) => {
   conn.on('close', () => connections.delete(conn));
 });
 
-server.listen(port);
-server.on('error', onError);
-server.on('listening', onListening);
+// OLD (remove/replace whatever you currently have that calls server.listen):
+// server.listen(port);
+// server.on('error', onError);
+// server.on('listening', onListening);
+
+// NEW:
+const STARTUP_TIMEOUT_MS = 20000; // 20s safety net so we don't hang forever
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
+(async () => {
+  try {
+    // Wait for MathJax to warm up (and anything else you'd like to gate on)
+    await withTimeout(mathJaxReady, STARTUP_TIMEOUT_MS, 'MathJax initialization');
+
+    server.listen(port);
+    server.on('error', onError);
+    server.on('listening', onListening);
+  } catch (err) {
+    console.error('Startup failed:', err && err.stack ? err.stack : err);
+    process.exit(1);
+  }
+})();
 
 function gracefulShutdown(signal) {
   console.log(`\n${signal} received. Graceful shutdown...`);
@@ -83,13 +111,17 @@ function onError(error) {
 function onListening() {
   const addr = server.address();
   const bind = typeof addr === 'string' ? 'pipe ' + addr : 'port ' + addr.port;
-  
+
+  const { version, packages } = getMathJaxInfo();
+
   console.log('\npb-math-service started!');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log(`✓ Listening on ${bind}`);
   console.log(`✓ Environment: ${config.nodeEnv}`);
   console.log(`✓ Process: ${process.pid}`);
   console.log(`✓ Node: ${process.version}`);
+  console.log(`✓ MathJax: v${version}`);
+  console.log(`✓ TeX packages: ${packages.join(', ')}`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('\nEndpoints:');
   console.log(`  GET  http://localhost:${port}/latex`);
