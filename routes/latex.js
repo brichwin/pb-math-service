@@ -9,7 +9,7 @@ router.use(cacheMiddleware);
 
 router.get('/', async (req, res, next) => {
   try {
-    const { latex, svg, fg, font, dpi, em, ex, width, lineWidth, scale} = req.query;
+    const { latex, svg, fg } = req.query;
     
     if(requiredParamsAreMissing(res, req.query, ['latex'])) return;
 

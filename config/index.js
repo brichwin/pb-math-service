@@ -8,7 +8,7 @@ module.exports = {
   // Speech configuration
   speech: {
     defaultEngine: process.env.SPEECH_ENGINE || 'mathcat', // 'mathcat' or 'mathjax'
-    lang: process.env.SPEECH_LANG || 'en',
+    defaultLang: process.env.SPEECH_LANG || 'en',
   },
   
   // Cache settings

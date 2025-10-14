@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>pb-mathjax Microservice Tester</title>
+  <style>
+    :root{--fg:#111;--bg:#fff;--muted:#6b7280;--accent:#4f46e5;--border:#e5e7eb}
+    html,body{height:100%}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Inter,Arial;line-height:1.35;background:var(--bg);color:var(--fg)}
+    header{padding:1rem 1.25rem;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10}
+    header h1{font-size:1.1rem;margin:0}
+    header .muted{color:var(--muted);font-size:.9rem}
+    main{display:grid;grid-template-columns:380px 1fr;gap:1rem;padding:1rem;align-items:start}
+    @media (max-width: 940px){main{grid-template-columns:1fr}}
+    .card{border:1px solid var(--border);border-radius:14px;overflow:hidden;background:#fff}
+    .card h2{font-size:1rem;margin:0;padding:.9rem 1rem;border-bottom:1px solid var(--border);background:#fafafa}
+    .card .content{padding:1rem}
+    .row{display:grid;grid-template-columns:140px 1fr;gap:.5rem;align-items:center;margin:.5rem 0}
+    .row label{font-size:.9rem;color:#374151}
+    .row input[type="text"], .row input[type="number"], .row select{width:100%;box-sizing:border-box;padding:.55rem .6rem;border:1px solid var(--border);border-radius:10px;background:#fff}
+    textarea{width:100%;min-height:150px;resize:vertical;padding:.75rem;border:1px solid var(--border);border-radius:10px;font-family:ui-monospace,Menlo,Consolas,monospace}
+    fieldset{border:1px solid var(--border);border-radius:12px}
+    legend{color:#374151;font-size:.9rem}
+    .controls{display:grid;gap:.75rem}
+    .stack{display:flex;flex-wrap:wrap;gap:.5rem}
+    .btn{appearance:none;border:1px solid var(--border);background:#fff;border-radius:10px;padding:.5rem .75rem;cursor:pointer}
+    .btn.primary{background:var(--accent);color:#fff;border-color:transparent}
+    .btn.ghost{background:#f8f8ff}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .urlbox{display:flex;gap:.5rem;align-items:center}
+    .urlbox input{flex:1}
+    .hint{font-size:.85rem;color:var(--muted)}
+    .preview{display:grid;place-items:center;min-height:320px;border:1px dashed var(--border);border-radius:12px;background:#fafafa}
+    .preview .canvas{padding:1rem;max-width:100%;overflow:auto}
+.kvs {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: .75rem;
+}
+.kvs .row {
+  grid-template-columns: 140px 1fr; /* label + input */
+}
+    .examples{display:flex;flex-wrap:wrap;gap:.5rem}
+    code.inline{background:#f3f4f6;border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem}
+    /* Make math rendering inputs bigger and easier to type into */
+.kvs input[type="number"] {
+  min-width: 100px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
+}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>pb-mathjax Microservice Tester <span class="muted">(build URLs, preview PNG/SVG)</span></h1>
+  </header>
+
+  <main>
+    <!-- LEFT: Controls -->
+    <section class="card" aria-labelledby="controls-title">
+      <h2 id="controls-title">Request Builder</h2>
+      <div class="content controls">
+        <div class="row">
+          <label for="baseUrl">Service Base URL</label>
+          <input id="baseUrl" type="text" value="http://localhost:3000" aria-describedby="baseUrlHint" />
+        </div>
+        <p id="baseUrlHint" class="hint">Example: <code class="inline">http://localhost:3000</code> or your deployed host.</p>
+
+        <div class="row">
+          <label for="mode">Input Type</label>
+          <select id="mode">
+            <option value="latex">LaTeX</option>
+            <option value="asciimath">AsciiMath</option>
+            <option value="mathml">MathML</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="expr" class="hint">Expression</label>
+          <textarea id="expr" spellcheck="false">x^2 + y^2 = z^2</textarea>
+        </div>
+
+        <fieldset class="content" style="margin-top:.25rem">
+          <legend>Output</legend>
+          <div class="row">
+            <label for="format">Format</label>
+            <select id="format">
+              <option value="png">PNG (default)</option>
+              <option value="svg">SVG</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="fg">Foreground <span class="hint">RRGGBB</span></label>
+            <input id="fg" type="text"  />
+          </div>
+          <div class="row">
+            <label for="font">Font</label>
+            <input id="font" type="text"  />
+          </div>
+          <div class="row" id="dpiRow">
+            <label for="dpi">DPI (PNG)</label>
+            <input id="dpi" type="number" inputmode="numeric" min="72" step="1"  />
+          </div>
+        </fieldset>
+
+        <fieldset class="content">
+          <legend>MathJax Rendering Options</legend>
+          <div class="kvs">
+            <div class="row"><label for="em">em (px)</label><input id="em" type="number" step="1" ></div>
+            <div class="row"><label for="ex">ex (px)</label><input id="ex" type="number" step="1" ></div>
+            <div class="row"><label for="width">width (px)</label><input id="width" type="number" step="1" ></div>
+            <div class="row"><label for="lineWidth">lineWidth (px)</label><input id="lineWidth" type="number" step="1" ></div>
+            <div class="row"><label for="scale">scale</label><input id="scale" type="number" step="0.1" ></div>
+          </div>
+        </fieldset>
+
+        <fieldset class="content">
+          <legend>Encoding</legend>
+          <div class="row">
+            <label for="isBase64">URL-safe Base64</label>
+            <select id="isBase64">
+              <option value="false">No</option>
+              <option value="true">Yes (add <code class="inline">isBase64=true</code>)</option>
+            </select>
+          </div>
+          <p class="hint">When enabled, the expression is base64-encoded with +→- and /→_, and trailing = removed.</p>
+        </fieldset>
+
+        <div class="stack">
+          <button type="button" class="btn primary" id="buildBtn">Build & Preview</button>
+          <button type="button" class="btn" id="copyUrlBtn" title="Copy URL">Copy URL</button>
+          <button type="button" class="btn ghost" id="openUrlBtn" title="Open URL in new tab">Open URL</button>
+        </div>
+
+        <details>
+          <summary class="hint">Examples</summary>
+          <div class="examples" style="margin-top:.5rem">
+            <button type="button" class="btn" data-example="latex:Quadratic">Quadratic (LaTeX)</button>
+            <button type="button" class="btn" data-example="asciimath:SumCubes">Sum of Cubes (AsciiMath)</button>
+            <button type="button" class="btn" data-example="mathml:InlineX">Simple x (MathML)</button>
+            <button type="button" class="btn" data-example="latex:Integral">Gaussian Integral (LaTeX)</button>
+          </div>
+        </details>
+
+      </div>
+    </section>
+
+    <!-- RIGHT: URL + Preview -->
+    <section class="card" aria-labelledby="preview-title">
+      <h2 id="preview-title">URL & Preview</h2>
+      <div class="content">
+        <div class="urlbox" style="margin-bottom:.75rem">
+          <input id="urlOut" type="text" readonly aria-label="Generated URL" />
+        </div>
+        <div class="hint" style="margin:.25rem 0 .75rem">If you selected SVG, the service uses <code class="inline">&amp;svg=1</code>. PNG ignores DPI when SVG is chosen.</div>
+        <div class="preview" aria-live="polite">
+          <div id="previewCanvas" class="canvas">
+            <div class="hint">Build to preview…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function(){
+      const el = (id) => document.getElementById(id);
+
+      const baseUrl = el('baseUrl');
+      const mode = el('mode');
+      const expr = el('expr');
+      const format = el('format');
+      const fg = el('fg');
+      const font = el('font');
+      const dpi = el('dpi');
+      const em = el('em');
+      const ex = el('ex');
+      const width = el('width');
+      const lineWidth = el('lineWidth');
+      const scale = el('scale');
+      const isBase64 = el('isBase64');
+      const urlOut = el('urlOut');
+      const previewCanvas = el('previewCanvas');
+      const dpiRow = el('dpiRow');
+
+      function urlSafeBase64Encode(str){
+        try { const b64 = btoa(str); return b64.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+        catch(e){ console.error('Base64 encode failed:', e); return str; }
+      }
+
+      function validHexColor(s){ return /^([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test((s || '').trim()); }
+
+      function buildUrl(){
+        const base = (baseUrl.value || '').replace(/\/$/, '');
+        const path = `/${mode.value}`;
+        const qp = new URLSearchParams();
+        const key = (mode.value === 'latex') ? 'latex' : (mode.value === 'asciimath' ? 'asciimath' : 'mathml');
+
+        let payload = expr.value || '';
+        if(isBase64.value === 'true'){
+          payload = urlSafeBase64Encode(payload);
+          qp.set('isBase64','true');
+        }
+        qp.set(key, payload);
+
+        if(format.value === 'svg') qp.set('svg','1');
+        if(fg.value && validHexColor(fg.value)) qp.set('fg', fg.value.trim());
+        if(font.value) qp.set('font', font.value.trim());
+        if(format.value !== 'svg' && dpi.value) qp.set('dpi', dpi.value.trim());
+
+        if(em.value) qp.set('em', em.value.trim());
+        if(ex.value) qp.set('ex', ex.value.trim());
+        if(width.value) qp.set('width', width.value.trim());
+        if(lineWidth.value) qp.set('lineWidth', lineWidth.value.trim());
+        if(scale.value) qp.set('scale', scale.value.trim());
+
+        return `${base}${path}?${qp.toString()}`;
+      }
+
+async function renderPreview(url) {
+  previewCanvas.innerHTML = '';
+  const start = performance.now();
+
+  try {
+    // Fetch as a blob to measure timing
+    const res = await fetch(url);
+    const end = performance.now();
+    const ms = (end - start).toFixed(1);
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+
+    // Build the preview image
+    const img = new Image();
+    img.alt = 'Rendered math preview';
+    img.src = objectUrl;
+    img.style.maxWidth = '100%';
+    img.style.height = 'auto';
+    previewCanvas.appendChild(img);
+
+    // Add timing info below
+    const timingInfo = document.createElement('div');
+    timingInfo.className = 'hint';
+    timingInfo.style.marginTop = '0.5rem';
+    timingInfo.textContent = `Response time: ${ms} ms`;
+    previewCanvas.appendChild(timingInfo);
+
+  } catch (err) {
+    previewCanvas.innerHTML = `<div class="hint">Preview failed: ${err.message}</div>`;
+  }
+}
+
+      function buildAndPreview(){
+        const url = buildUrl();
+        urlOut.value = url;
+        renderPreview(url);
+      }
+
+      document.getElementById('buildBtn').addEventListener('click', (e)=>{ e.preventDefault(); buildAndPreview(); });
+      document.getElementById('openUrlBtn').addEventListener('click', (e)=>{ e.preventDefault(); const url = urlOut.value || buildUrl(); window.open(url, '_blank', 'noopener'); });
+      document.getElementById('copyUrlBtn').addEventListener('click', async (e)=>{
+        e.preventDefault();
+        const url = urlOut.value || buildUrl();
+        try{
+          if(navigator.clipboard && window.isSecureContext){
+            await navigator.clipboard.writeText(url);
+          } else {
+            // Fallback copy
+            const ta = document.createElement('textarea');
+            ta.value = url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+          }
+          e.target.textContent = 'Copied!'; setTimeout(()=>e.target.textContent='Copy URL', 1200);
+        }catch(err){ console.error(err); e.target.textContent = 'Copy failed'; setTimeout(()=>e.target.textContent='Copy URL', 1600); }
+      });
+
+      format.addEventListener('change', ()=>{ dpiRow.style.display = (format.value === 'svg') ? 'none' : ''; });
+
+      document.querySelectorAll('[data-example]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const [kind, name] = (btn.getAttribute('data-example')||'').split(':');
+          mode.value = kind; format.value = 'png'; isBase64.value = 'false';
+          fg.value = ''; font.value = ''; dpi.value='300'; em.value=''; ex.value=''; width.value=''; lineWidth.value=''; scale.value='';
+          switch(name){
+            case 'Quadratic': expr.value = '\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}'; break;
+            case 'SumCubes': expr.value = 'sum_(i=1)^n i^3 = (n(n+1)/2)^2'; break;
+            case 'InlineX': expr.value = '<math><mi>x</mi></math>'; break;
+            case 'Integral': expr.value = '\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}'; break;
+          }
+          buildAndPreview();
+        });
+      });
+
+      // Initial build
+      buildAndPreview();
+    })();
+  </script>
+</body>
+</html>

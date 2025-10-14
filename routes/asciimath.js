@@ -9,7 +9,7 @@ router.use(cacheMiddleware);
 
 router.get('/', async (req, res, next) => {
   try {
-    const { asciimath, svg, fg, font, dpi, em, ex, width, lineWidth, scale} = req.query;
+    const { asciimath, svg, fg } = req.query;
     
     if(requiredParamsAreMissing(res, req.query, ['asciimath'])) return;
 

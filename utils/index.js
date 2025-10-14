@@ -1,4 +1,3 @@
-
   // Helper functions for type coercion
   const toBool = (v) =>
     typeof v === 'string'

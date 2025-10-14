@@ -4,6 +4,7 @@ const app = require('../app');
 const http = require('http');
 const config = require('../config');
 const { mathJaxReady, getMathJaxInfo } = require('../services/mathJaxConverters'); 
+const { getSpeechGeneratorsInfo } = require('../services/speechGenerators');
 
 const port = config.port;
 app.set('port', port);
@@ -23,13 +24,7 @@ server.on('connection', (conn) => {
   conn.on('close', () => connections.delete(conn));
 });
 
-// OLD (remove/replace whatever you currently have that calls server.listen):
-// server.listen(port);
-// server.on('error', onError);
-// server.on('listening', onListening);
-
-// NEW:
-const STARTUP_TIMEOUT_MS = 20000; // 20s safety net so we don't hang forever
+const STARTUP_TIMEOUT_MS = 50000; // 20s safety net so we don't hang forever
 
 function withTimeout(promise, ms, label) {
   return Promise.race([
@@ -40,14 +35,18 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
+let speechGenerators = [];
+
 (async () => {
   try {
-    // Wait for MathJax to warm up (and anything else you'd like to gate on)
+    // Wait for MathJax to warm up
     await withTimeout(mathJaxReady, STARTUP_TIMEOUT_MS, 'MathJax initialization');
+    speechGenerators = await getSpeechGeneratorsInfo();
 
     server.listen(port);
     server.on('error', onError);
     server.on('listening', onListening);
+    console.log('Startup complete.');
   } catch (err) {
     console.error('Startup failed:', err && err.stack ? err.stack : err);
     process.exit(1);
@@ -109,23 +108,34 @@ function onError(error) {
 }
 
 function onListening() {
-  const addr = server.address();
-  const bind = typeof addr === 'string' ? 'pipe ' + addr : 'port ' + addr.port;
+  try {
+    const addr = server.address();
+    const bind = typeof addr === 'string' ? 'pipe ' + addr : 'port ' + addr.port;
+    const { version, packages, versions } = getMathJaxInfo();
+    console.log('\npb-math-service started!');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`✓ Listening on ${bind}`);
+    console.log(`✓ Environment: ${config.nodeEnv}`);
+    console.log(`✓ Process: ${process.pid}`);
+    console.log(`✓ Node: ${process.version}`);
+    console.log(`\n✓ MathJax: v${version}`);
+    console.log(`✓ TeX packages: ${packages.join(', ')}`);    
+    versions.forEach(v => console.log(`  - ${v}`));
 
-  const { version, packages } = getMathJaxInfo();
+    console.log('\n✓ Speech Generators:');
+    speechGenerators.forEach(info => {
+      console.log(`  - ${info.engine}: v${info.version}`);
+    });
 
-  console.log('\npb-math-service started!');
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log(`✓ Listening on ${bind}`);
-  console.log(`✓ Environment: ${config.nodeEnv}`);
-  console.log(`✓ Process: ${process.pid}`);
-  console.log(`✓ Node: ${process.version}`);
-  console.log(`✓ MathJax: v${version}`);
-  console.log(`✓ TeX packages: ${packages.join(', ')}`);
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('\nEndpoints:');
-  console.log(`  GET  http://localhost:${port}/latex`);
-  console.log(`  GET  http://localhost:${port}/speechtext`);
-  console.log(`  GET  http://localhost:${port}/cache-stats`);
-  console.log('\n');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('\nEndpoints:');
+    console.log(`  GET http://localhost:${port}/latex`);
+    console.log(`  GET http://localhost:${port}/mathml`);
+    console.log(`  GET http://localhost:${port}/asciimath`);
+    console.log(`  GET http://localhost:${port}/speechtext`);
+    console.log('\n');
+    
+  } catch (error) {
+    console.error('Error in onListening:', error);
+  }
 }

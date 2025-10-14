@@ -16,6 +16,12 @@ function pngFromSvg(svgString, pngOptions = {}) {
         loadSystemFonts: false,
       },
       dpi: pngOptions.dpi,
+      shapeRendering: 2,
+      textRendering: 1,
+      imageRendering: 0,
+      fitTo: {
+        mode: 'original'
+      }
     });
     
     const pngData = resvg.render();

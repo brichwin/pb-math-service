@@ -9,7 +9,7 @@ router.use(cacheMiddleware);
 
 router.get('/', async (req, res, next) => {
   try {
-    const { mathml, svg, fg, font, dpi, em, ex, width, lineWidth, scale} = req.query;
+    const { mathml, svg, fg } = req.query;
     
     if(requiredParamsAreMissing(res, req.query, ['mathml'])) return;
 
