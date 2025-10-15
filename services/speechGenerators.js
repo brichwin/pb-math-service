@@ -29,9 +29,9 @@ function getDefaultStyle(engine) {
   return engine.toLowerCase() === 'sre' ? 'ClearSpeak' : 'ClearSpeak';
 }
 
-function getDefaultVerbosity(engine, style) {
+function getDefaultVerbosity(engine='mathcat', style='') {
   if (engine.toLowerCase() === 'sre') {
-    if(style === 'MathSpeak') {
+    if(style.toLowerCase() === 'mathspeak') {
       return 'Verbose';
     } else {
       return 'Explicit';
@@ -58,6 +58,10 @@ function getSpeechOptionsFromQuery(query) {
   if(engine !== 'sre') {
     style = correctCasingForMathCAT[style.toLowerCase()] || style;
     verbosity = correctCasingForMathCAT[verbosity.toLowerCase()] || verbosity;
+  } else {
+    if(style.toLowerCase() === 'mathspeak' && verbosity.toLowerCase() === 'superbrief') {
+      verbosity = 'sbrief';
+    }
   }
  console.log(`gsofq: Speech options - Engine: ${engine}, Style: ${style}, Verbosity: ${verbosity}, Language: ${lang}`);
   const options = { engine, style, verbosity, lang };
@@ -70,7 +74,7 @@ function generateSpeechWithMathCAT(mathml, options = {}) {
   // Set MathCAT preferences if they have changed
   const { engine, style, verbosity, lang } = options;
 
-  const valid = validSpeechOptions(engine, style, verbosity);
+  const valid = validateSpeechOptions(engine, style, verbosity);
   if (!valid.valid) {
     throw new Error(valid.error);
   }
@@ -108,19 +112,32 @@ const generateSpeechWithSRE = async (mml, options) => {
     // Set SRE preferences if they have changed
   const { engine, style, verbosity, lang } = options;
 
-  if (!validSpeechOptions(engine, style, verbosity).valid) {
+    let SREDomain = style;
+    let SREStyle = verbosity;
+    
+  if (!validateSpeechOptions(engine, style, verbosity).valid) {
     throw new Error('Invalid speech options provided.');
   }
 
   console.log(`Using SRE with Style: ${style}, Verbosity: ${verbosity}, Language: ${lang}`);
 
+  if(SREDomain && SREDomain.toLowerCase() === 'clearspeak') {
+    if(SREStyle && SREStyle.toLowerCase() === 'explicit') {
+      SREStyle = config.speech.SREClearSpeakExplicitPrefs;
+    } else {
+      SREStyle = '';
+    }
+  }
+  
   const SREOptions = {
-    domain: style,
+    domain: SREDomain,
+    style: SREStyle,
     locale: lang,
     markup: 'none',
     modality: 'speech'
   }
 
+  console.log('SRE Options:', JSON.stringify(SREOptions));
   await SRE.engineReady();
   await SRE.setupEngine(SREOptions);
   const speech = SRE.toSpeech(mml);
@@ -160,7 +177,7 @@ const speechTextFromAM = async (asciimath, query = {}) => {
 /**
  * Validate speech options
  */
-function validSpeechOptions(engine, style, verbosity) {
+function validateSpeechOptions(engine, style, verbosity) {
   const validOptions = {
     mathcat: {
       clearspeak: ['verbose'],
@@ -168,7 +185,7 @@ function validSpeechOptions(engine, style, verbosity) {
     },
     sre: {
       clearspeak: ['auto', 'explicit'],
-      mathspeak: ['verbose', 'brief', 'superbrief'],
+      mathspeak: ['verbose', 'brief', 'sbrief'],
     },
   };
   
@@ -210,5 +227,7 @@ module.exports = {
   getSpeechGeneratorsInfo,
   speechTextFromTeX,
   speechTextFromMathML,
-  speechTextFromAM
+  speechTextFromAM,
+  getSpeechOptionsFromQuery,
+  validateSpeechOptions
 };

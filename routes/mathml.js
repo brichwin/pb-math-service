@@ -38,7 +38,7 @@ router.get('/', async (req, res, next) => {
     res.send(png);
     
   } catch (error) {
-    sendError(req, res, 500, 'Internal server error', error.message);
+    sendError(req, res, 500, 'Internal server error', `${error.message} ${error.stack}`);
   }
 });
 

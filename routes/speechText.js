@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const cacheMiddleware = require('../middleware/cache');
 const { processFormula } = require('../utils');
-const { speechTextFromTeX, speechTextFromMathML, speechTextFromAM } = require('../services/speechGenerators');
+const { speechTextFromTeX, speechTextFromMathML, speechTextFromAM, getSpeechOptionsFromQuery, validateSpeechOptions } = require('../services/speechGenerators');
 const { sendError } = require('../utils/sendErrorHandler');
 
 router.use(cacheMiddleware);
@@ -17,7 +17,12 @@ router.get('/', async (req, res, next) => {
   try {    
     const { asciimath, latex, mathml } = req.query;
 
-    if(latex) {
+    const options = getSpeechOptionsFromQuery(req.query);
+    const validation = validateSpeechOptions(options.engine, options.style, options.verbosity);
+
+    if(!validation.valid) {
+      sendError(req, res, 400, 'Invalid speech options', validation.error);
+    } else if(latex) {
       const formula = processFormula(req, res, latex);
       if (!formula) return;
       console.log('Received Formula:', formula);
@@ -43,7 +48,7 @@ router.get('/', async (req, res, next) => {
     }
     
   } catch (error) {
-    sendError(req, res, 500, 'Internal server error', error.message);
+    sendError(req, res, 500, 'Internal server error', `${error.message} ${error.stack}`);
   }
 });
 

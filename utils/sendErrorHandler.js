@@ -83,10 +83,10 @@ const sendError = (req, res, status = 400, error = defaultErrorMessage, message)
       if (config.errors.httpResponseErrorHeader) {
         res.set(
           config.errors.httpResponseErrorHeader,
-          message || error || defaultErrorMessage
+          error || defaultErrorMessage
         );
       }
-      return res.status(200).send(`Error: ${error}: ${message}`);
+      return res.status(200).send(`Error: ${error}`);
     } else {
       // If configured to always send image or speech on error, send a SVG
       const errorSvg = createErrorSvg(error || defaultErrorMessage);
@@ -95,7 +95,7 @@ const sendError = (req, res, status = 400, error = defaultErrorMessage, message)
       if (config.errors.httpResponseErrorHeader) {
         res.set(
           config.errors.httpResponseErrorHeader,
-          message || error || defaultErrorMessage
+          error || defaultErrorMessage
         );
       }
       return res.status(200).send(errorSvg);
