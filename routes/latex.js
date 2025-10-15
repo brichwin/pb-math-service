@@ -4,6 +4,7 @@ const cacheMiddleware = require('../middleware/cache');
 const { buildMathConversionOptions, svgFromTeX } = require('../services/mathJaxConverters');
 const { buildPngFromSvgConversionOptions, pngFromSvg } = require('../services/imageConverter');
 const { toBool, requiredParamsAreMissing, processFormula } = require('../utils');
+const { sendError } = require('../utils/sendErrorHandler');
 
 router.use(cacheMiddleware);
 
@@ -11,9 +12,7 @@ router.get('/', async (req, res, next) => {
   try {
     const { latex, svg, fg } = req.query;
     
-    if(requiredParamsAreMissing(res, req.query, ['latex'])) return;
-
-    console.log('Received LaTeX:', latex);
+    if(requiredParamsAreMissing(req, res, ['latex'])) return;
     const formula = processFormula(req, res, latex);
     if (!formula) return; // processFormula already handled the response in case of error
 
@@ -24,7 +23,6 @@ router.get('/', async (req, res, next) => {
     // Generate SVG
     let newSvg = await svgFromTeX(formula, mathConversionOptions, fg);
 
-    console.log('Generated SVG:', newSvg);
     // If SVG output is requested, return it directly
     if (toBool(svg)) {
       res.set('Content-Type', 'image/svg+xml');
@@ -42,7 +40,7 @@ router.get('/', async (req, res, next) => {
     res.send(png);
     
   } catch (error) {
-    next(error);
+    sendError(req, res, 500, 'Internal server error', error.message);
   }
 });
 

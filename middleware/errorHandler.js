@@ -36,5 +36,5 @@ function notFoundHandler(req, res) {
 
 module.exports = {
   errorHandler,
-  notFoundHandler,
+  notFoundHandler
 };

@@ -3,6 +3,7 @@ const router = express.Router();
 const cacheMiddleware = require('../middleware/cache');
 const { processFormula } = require('../utils');
 const { speechTextFromTeX, speechTextFromMathML, speechTextFromAM } = require('../services/speechGenerators');
+const { sendError } = require('../utils/sendErrorHandler');
 
 router.use(cacheMiddleware);
 
@@ -38,11 +39,11 @@ router.get('/', async (req, res, next) => {
       sendSpeechText(speechText, res);
 
     } else {
-      return res.status(400).send('One of "asciimath", "latex", or "mathml" parameter is required.');
+      return sendError(req, res, 400, "Missing required parameter", 'One of "asciimath", "latex", or "mathml" parameter is required.');
     }
     
   } catch (error) {
-    next(error);
+    sendError(req, res, 500, 'Internal server error', error.message);
   }
 });
 

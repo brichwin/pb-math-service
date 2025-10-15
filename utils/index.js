@@ -1,11 +1,12 @@
-  // Helper functions for type coercion
-  const toBool = (v) =>
-    typeof v === 'string'
-      ? ['true', '1', 'yes', 'on'].includes(v.toLowerCase())
-      : !!v;
+const {sendError} = require("./sendErrorHandler");
 
-  const toNum = (v) => (v !== undefined ? Number(v) : undefined);
+// Helper functions for type coercion
+const toBool = (v) =>
+  typeof v === "string"
+    ? ["true", "1", "yes", "on"].includes(v.toLowerCase())
+    : !!v;
 
+const toNum = (v) => (v !== undefined ? Number(v) : undefined);
 
 /**
  * Get a numeric query parameter with min/max bounds and default fallback.
@@ -17,7 +18,7 @@
  */
 function getNumberParam(value, min, max, defaultValue) {
   // If missing or empty, use default
-  if (value === undefined || value === '') {
+  if (value === undefined || value === "") {
     return defaultValue;
   }
 
@@ -42,50 +43,78 @@ function getNumberParam(value, min, max, defaultValue) {
  * @param {string[]} required - A list of required parameter names.
  * @returns {string[]} - A list of missing parameter names.
  */
-function requiredParamsAreMissing(res, query, required) {
-  const missing = required.filter(param => query[param] === undefined || query[param] === '');
+function requiredParamsAreMissing(req, res, required) {
+  const query = req.query;
+  const missing = required.filter(
+    (param) => query[param] === undefined || query[param] === ""
+  );
   if (missing.length > 0) {
-      res.status(400).json({
-        error:
-          missing.length === 1
-            ? `${missing[0]} parameter is required`
-            : `Missing required parameters: ${missing.join(', ')}`
-      });
-      return true;
-    }
+    sendError(req, res, 400, "Missing required parameter(s)",
+        missing.length === 1
+          ? `${missing[0]} parameter is required`
+          : `Missing required parameters: ${missing.join(", ")}`
+    );
+    return true;
+  }
   return false;
 }
 
+const isBase64 = (str) => {
+  // Check if empty or not a string
+  if (!str || typeof str !== "string") {
+    return false;
+  }
+
+  // Remove whitespace (base64 can have line breaks in some formats)
+  str = str.trim();
+
+  // Check length is multiple of 4
+  if (str.length % 4 !== 0) {
+    return false;
+  }
+
+  // Check valid base64 characters
+  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+  if (!base64Regex.test(str)) {
+    return false;
+  }
+
+  // Try to decode and re-encode
+  try {
+    const decoded = Buffer.from(str, "base64").toString("base64");
+    return decoded === str;
+  } catch (err) {
+    return false;
+  }
+};
+
 /*
  * Helper to process and validate formula input from requests
-* @param {object} req - Express request object
-* @param {object} res - Express response object
-* @param {string} formula - The formula input (LaTeX, AsciiMath, or MathML)
-* @returns {string|null} - The processed formula string or null if there was an error (response already sent)
-*/
-const processFormula = (req, res, formula) => { 
+ * @param {object} req - Express request object
+ * @param {object} res - Express response object
+ * @param {string} formula - The formula input (LaTeX, AsciiMath, or MathML)
+ * @returns {string|null} - The processed formula string or null if there was an error (response already sent)
+ */
+const processFormula = (req, res, formula) => {
   // Check if the formula is base64 encoded
   if (toBool(req.query.isBase64) && formula) {
     try {
-      formula = Buffer.from(formula, 'base64').toString('utf-8').trim();
+      if(!isBase64(formula)) {
+        throw new Error("Not valid base64");
+      }
+      formula = Buffer.from(formula, "base64").toString("utf-8").trim();
     } catch (error) {
-      res.status(400).json({
-        error: 'Invalid base64 string',
-        message: 'The provided formula is not a valid base64 encoded string'
-      });
-      return null; 
+      sendError(req, res, 400, "Invalid base64 string", "The provided formula is not a valid base64 encoded string");
+      return null;
     }
   }
 
   if (!formula || formula.length === 0) {
-    res.status(400).json({
-      error: 'Formula is required',
-      message: 'Please provide a formula to process'
-    });
+    sendError(req, res, 400, "Formula is required", "Please provide a formula to process");
     return null;
   }
 
-  return formula;
+  return formula.trim();
 };
 
 module.exports = {
@@ -93,5 +122,5 @@ module.exports = {
   toNum,
   getNumberParam,
   requiredParamsAreMissing,
-  processFormula
+  processFormula,
 };

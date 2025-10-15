@@ -2,7 +2,8 @@
 
 const { toBool, toNum } = require("../utils");
 
-const CoreV3ish = [ // mirrors MathJax v3's AllPackages
+const CoreV3ish = [
+  // mirrors MathJax v3's AllPackages
   "action",
   "amscd",
   "bbox",
@@ -26,7 +27,7 @@ const CoreV3ish = [ // mirrors MathJax v3's AllPackages
   "unicode",
   "verb",
   "tagformat",
-  "textcomp"
+  "textcomp",
 ];
 
 // Add the extras you want:
@@ -300,27 +301,14 @@ const mmlFromMathML = async (mathml) => {
  * @returns {Promise<string>} Promise that resolves to standalone SVG markup
  * @throws {Error} If MathJax fails to convert the TeX expression
  */
-const svgFromTeX = async (tex, options={}, fgColor) => {
-  console.log(
-    "svgFromTeX called with tex:",
-    tex,
-    "options:",
-    JSON.stringify(options),
-    "fgColor:",
-    fgColor
-  );
-  console.log("keys:", Object.keys(MathJax));
-
+const svgFromTeX = async (tex, options = {}, fgColor) => {
   const scale = options.scale || 1;
-  if ('scale' in options) {
+  if ("scale" in options) {
     delete options.scale;
   }
 
-  console.log("Using scale:", scale);
   await mathJaxReady;
-  console.log("MathJax startup promise resolved");
   const svgNode = await MathJax.tex2svgPromise(tex, options);
-  console.log("tex2svgPromise resolved");
   return applySvgColor(
     makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale), fgColor),
     fgColor
@@ -341,14 +329,17 @@ const svgFromTeX = async (tex, options={}, fgColor) => {
  * @returns {Promise<string>} Promise that resolves to standalone SVG markup
  * @throws {Error} If MathJax fails to convert the AsciiMath expression
  */
-const svgFromAM = async (asciimath, options={}, fgColor) => {
+const svgFromAM = async (asciimath, options = {}, fgColor) => {
   const scale = options.scale || 1;
-  if ('scale' in options) {
+  if ("scale" in options) {
     delete options.scale;
   }
   await mathJaxReady;
   const svgNode = await MathJax.asciimath2svgPromise(asciimath, options);
-  return applySvgColor(makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale)), fgColor);
+  return applySvgColor(
+    makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale)),
+    fgColor
+  );
 };
 
 /**
@@ -365,14 +356,17 @@ const svgFromAM = async (asciimath, options={}, fgColor) => {
  * @returns {Promise<string>} Promise that resolves to standalone SVG markup
  * @throws {Error} If MathJax fails to convert the MathML
  */
-const svgFromMathML = async (mathml, options={}, fgColor) => {
+const svgFromMathML = async (mathml, options = {}, fgColor) => {
   const scale = options.scale || 1;
-  if ('scale' in options) {
+  if ("scale" in options) {
     delete options.scale;
   }
   await mathJaxReady;
   const svgNode = await MathJax.mathml2svgPromise(mathml, options);
-  return applySvgColor(makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale)), fgColor);
+  return applySvgColor(
+    makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale)),
+    fgColor
+  );
 };
 
 /**
@@ -453,10 +447,10 @@ const buildMathConversionOptions = (query = {}) => {
 const getMathJaxInfo = () => {
   const mj = global.MathJax || {};
   const version = mj.version || "unknown";
-  
+
   const versions = [];
 
-  if(mj.loader && mj.loader.versions) {
+  if (mj.loader && mj.loader.versions) {
     mj.loader.versions.forEach((version, name) => {
       versions.push(`${name}: ${version}`);
     });

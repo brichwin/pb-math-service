@@ -4,6 +4,7 @@ const cacheMiddleware = require('../middleware/cache');
 const { buildMathConversionOptions, svgFromMathML } = require('../services/mathJaxConverters');
 const { buildPngFromSvgConversionOptions, pngFromSvg } = require('../services/imageConverter');
 const { toBool, requiredParamsAreMissing, processFormula } = require('../utils');
+const { sendError } = require('../utils/sendErrorHandler');
 
 router.use(cacheMiddleware);
 
@@ -11,7 +12,7 @@ router.get('/', async (req, res, next) => {
   try {
     const { mathml, svg, fg } = req.query;
     
-    if(requiredParamsAreMissing(res, req.query, ['mathml'])) return;
+    if(requiredParamsAreMissing(req, res, ['mathml'])) return;
 
     const formula = processFormula(req, res, mathml);
     if (!formula) return; // processFormula already handled the response in case of error
@@ -37,7 +38,7 @@ router.get('/', async (req, res, next) => {
     res.send(png);
     
   } catch (error) {
-    next(error);
+    sendError(req, res, 500, 'Internal server error', error.message);
   }
 });
 
