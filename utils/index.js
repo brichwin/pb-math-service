@@ -59,6 +59,16 @@ function requiredParamsAreMissing(req, res, required) {
   return false;
 }
 
+const urlSafeBase64ToBase64 = (urlSafeBase64) => {
+    let base64 = urlSafeBase64.replace(/-/g, '+').replace(/_/g, '/');
+    
+    while (base64.length % 4 !== 0) {
+        base64 += '=';
+    }
+    
+    return base64;
+}
+
 const isBase64 = (str) => {
   // Check if empty or not a string
   if (!str || typeof str !== "string") {
@@ -68,24 +78,13 @@ const isBase64 = (str) => {
   // Remove whitespace (base64 can have line breaks in some formats)
   str = str.trim();
 
-  // Check length is multiple of 4
-  if (str.length % 4 !== 0) {
-    return false;
-  }
-
-  // Check valid base64 characters
+  // Allows both standard (+/) and URL-safe (-_) base64
   const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
   if (!base64Regex.test(str)) {
+    console.error("Invalid base64 string: Contains invalid characters");
     return false;
   }
-
-  // Try to decode and re-encode
-  try {
-    const decoded = Buffer.from(str, "base64").toString("base64");
-    return decoded === str;
-  } catch (err) {
-    return false;
-  }
+  return true
 };
 
 /*
@@ -99,11 +98,15 @@ const processFormula = (req, res, formula) => {
   // Check if the formula is base64 encoded
   if (toBool(req.query.isBase64) && formula) {
     try {
+      formula = urlSafeBase64ToBase64(formula);
+      console.log("processFormula: urlSafeBase64ToBase64 applied:", formula);
       if(!isBase64(formula)) {
+        console.error("processFormula: Not valid base64");
         throw new Error("Not valid base64");
       }
       formula = Buffer.from(formula, "base64").toString("utf-8").trim();
     } catch (error) {
+      console.error("processFormula: Error decoding base64", error);
       sendError(req, res, 400, "Invalid base64 string", "The provided formula is not a valid base64 encoded string");
       return null;
     }

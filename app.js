@@ -22,6 +22,20 @@ const allowedOrigins = [
   'http://localhost:3000',   // this service itself
   'http://localhost:5500',   // eg. local static server for the tester page
   'http://127.0.0.1:5500',
+  'http://127.0.0.1:49777',
+  'http://127.0.0.1:49778',
+  'http://oss-pb-local.lindo.site',
+  'https://localhost:5500',   // eg. local static server for the tester page
+  'https://127.0.0.1:5500',
+  'https://127.0.0.1:49777',
+  'https://127.0.0.1:49778',
+  'https://oss-pb-local.lindo.site',
+    // Add these for Lando internal communication
+  'http://pressbooks.test',           // Your Pressbooks site
+  'http://appserver',                 // Lando PHP service name
+  'http://appserver_nginx',           // Lando nginx service name
+  null                                // Allow requests with no origin (server-to-server)
+
   // 'https://your-pressbooks-site.example', // add real sites here
 ];
 app.use(cors({
