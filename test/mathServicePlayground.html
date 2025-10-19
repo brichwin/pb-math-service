@@ -58,6 +58,23 @@ textarea {
   padding: 0.4rem 0.6rem;
   font-size: 0.9rem;
 }
+    .speech-section {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #f8f9fa;
+    }
+    .speech-text {
+      font-family: ui-sans-serif, system-ui, -apple-system;
+      font-size: 0.9rem;
+      line-height: 1.4;
+      margin: 0.5rem 0;
+      padding: 0.5rem;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
   </style>
 </head>
 <body>
@@ -92,8 +109,6 @@ textarea {
 
         <div class="stack">
           <button type="button" class="btn primary" id="buildBtn">Build & Preview</button>
-          <button type="button" class="btn" id="copyUrlBtn" title="Copy URL">Copy URL</button>
-          <button type="button" class="btn ghost" id="openUrlBtn" title="Open URL in new tab">Open URL</button>
         </div>
 
         <details>
@@ -162,10 +177,28 @@ textarea {
         <div class="urlbox" style="margin-bottom:.75rem">
           <input id="urlOut" type="text" readonly aria-label="Generated URL" />
         </div>
+        <div class="stack" style="margin-bottom:.75rem">
+          <button type="button" class="btn" id="copyUrlBtn" title="Copy URL">Copy URL</button>
+          <button type="button" class="btn ghost" id="openUrlBtn" title="Open URL in new tab">Open URL</button>
+        </div>
         <div class="hint" style="margin:.25rem 0 .75rem">If you selected SVG, the service uses <code class="inline">&amp;svg=1</code>. PNG ignores DPI when SVG is chosen.</div>
         <div class="preview" aria-live="polite">
           <div id="previewCanvas" class="canvas">
             <div class="hint">Build to preview…</div>
+          </div>
+        </div>
+        
+        <div class="speech-section">
+          <div class="hint" style="margin-bottom: 0.5rem;">Speech Text</div>
+          <div class="urlbox" style="margin-bottom:.5rem">
+            <input id="speechUrlOut" type="text" readonly aria-label="Generated Speech URL" />
+          </div>
+          <div class="stack" style="margin-bottom:.75rem">
+            <button type="button" class="btn" id="copySpeechUrlBtn" title="Copy Speech URL">Copy Speech URL</button>
+            <button type="button" class="btn ghost" id="openSpeechUrlBtn" title="Open Speech URL in new tab">Open Speech URL</button>
+          </div>
+          <div id="speechCanvas">
+            <div class="hint">Build to generate speech…</div>
           </div>
         </div>
       </div>
@@ -192,6 +225,8 @@ textarea {
       const urlOut = el('urlOut');
       const previewCanvas = el('previewCanvas');
       const dpiRow = el('dpiRow');
+      const speechCanvas = el('speechCanvas');
+      const speechUrlOut = el('speechUrlOut');
 
       function urlSafeBase64Encode(str){
         try { const b64 = btoa(str); return b64.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
@@ -262,10 +297,59 @@ async function renderPreview(url) {
   }
 }
 
+      async function renderSpeech(baseUrl, mode, expression) {
+        speechCanvas.innerHTML = '<div class="hint">Generating speech...</div>';
+        const start = performance.now();
+
+        try {
+          const qp = new URLSearchParams();
+          qp.set(mode, expression);
+          const speechUrl = `${baseUrl}/speechtext?${qp.toString()}`;
+          speechUrlOut.value = speechUrl;
+          
+          const res = await fetch(speechUrl, {
+            method: 'GET'
+          });
+          
+          const end = performance.now();
+          const ms = (end - start).toFixed(1);
+
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+          const speechText = await res.text();
+          
+          speechCanvas.innerHTML = '';
+          
+          const speechDiv = document.createElement('div');
+          speechDiv.className = 'speech-text';
+          speechDiv.textContent = speechText || 'No speech generated';
+          speechCanvas.appendChild(speechDiv);
+
+          const timingInfo = document.createElement('div');
+          timingInfo.className = 'hint';
+          timingInfo.style.marginTop = '0.5rem';
+          timingInfo.textContent = `Speech generation time: ${ms} ms`;
+          speechCanvas.appendChild(timingInfo);
+
+        } catch (err) {
+          speechCanvas.innerHTML = `<div class="hint">Speech generation failed: ${err.message}</div>`;
+        }
+      }
+
       function buildAndPreview(){
         const url = buildUrl();
         urlOut.value = url;
         renderPreview(url);
+        
+        // Generate speech text
+        const base = (baseUrl.value || '').replace(/\/$/, '');
+        const expression = expr.value || '';
+        if (expression.trim()) {
+          renderSpeech(base, mode.value, expression);
+        } else {
+          speechCanvas.innerHTML = '<div class="hint">No expression to generate speech for</div>';
+          speechUrlOut.value = '';
+        }
       }
 
       document.getElementById('buildBtn').addEventListener('click', (e)=>{ e.preventDefault(); buildAndPreview(); });
@@ -283,6 +367,23 @@ async function renderPreview(url) {
           }
           e.target.textContent = 'Copied!'; setTimeout(()=>e.target.textContent='Copy URL', 1200);
         }catch(err){ console.error(err); e.target.textContent = 'Copy failed'; setTimeout(()=>e.target.textContent='Copy URL', 1600); }
+      });
+
+      document.getElementById('openSpeechUrlBtn').addEventListener('click', (e)=>{ e.preventDefault(); const url = speechUrlOut.value; if(url) window.open(url, '_blank', 'noopener'); });
+      document.getElementById('copySpeechUrlBtn').addEventListener('click', async (e)=>{
+        e.preventDefault();
+        const url = speechUrlOut.value;
+        if(!url) return;
+        try{
+          if(navigator.clipboard && window.isSecureContext){
+            await navigator.clipboard.writeText(url);
+          } else {
+            // Fallback copy
+            const ta = document.createElement('textarea');
+            ta.value = url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+          }
+          e.target.textContent = 'Copied!'; setTimeout(()=>e.target.textContent='Copy Speech URL', 1200);
+        }catch(err){ console.error(err); e.target.textContent = 'Copy failed'; setTimeout(()=>e.target.textContent='Copy Speech URL', 1600); }
       });
 
       format.addEventListener('change', ()=>{ dpiRow.style.display = (format.value === 'svg') ? 'none' : ''; });
