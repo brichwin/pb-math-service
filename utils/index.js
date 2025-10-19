@@ -125,5 +125,5 @@ module.exports = {
   toNum,
   getNumberParam,
   requiredParamsAreMissing,
-  processFormula,
+  processFormula
 };

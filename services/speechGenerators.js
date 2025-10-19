@@ -3,12 +3,12 @@ const config = require('../config');
 const { initMathcat, getSpeechTextFromMathcat, setMathcatPreference, getMathcatVersion } = require('../lib/mathcat-wrapper');
 const SRE = require('speech-rule-engine');
 const { mmlFromAM, mmlFromMathML, mmlFromTeX } = require('./mathJaxConverters');  
+const { withTimeout, mathJaxLock, mathCATLock, SRELock } = require('../utils/locks');
 
 // Initialize MathCAT once
 let mathcatInitialized = false;
 
 let currentMathcatOptions = {};
-let currentSREOptions = {};
 
 function ensureMathCATInitialized() {
   if (!mathcatInitialized) {
@@ -68,7 +68,7 @@ function getSpeechOptionsFromQuery(query) {
   return options;
 }
 
-function generateSpeechWithMathCAT(mathml, options = {}) {
+async function generateSpeechWithMathCAT(mathml, options = {}) {
   ensureMathCATInitialized();
 
   // Set MathCAT preferences if they have changed
@@ -80,32 +80,52 @@ function generateSpeechWithMathCAT(mathml, options = {}) {
   }
 
   console.log(`Using MathCAT with Style: ${style}, Verbosity: ${verbosity}, Language: ${lang}`);
-  if (currentMathcatOptions.style !== style) {
-    setMathcatPreference('SpeechStyle', style);
-  }
-  if (currentMathcatOptions.verbosity !== verbosity) {
-    setMathcatPreference('Verbosity', verbosity);
-  }
-  if (currentMathcatOptions.lang !== lang) {
-    setMathcatPreference('Language', lang);
-  }
-
-  // Update current options
-  currentMathcatOptions = {...options };
-
+  
+  let speech = null;
+  await mathCATLock.acquire();
   try {
-    const result = getSpeechTextFromMathcat(mathml);
-    
-    if (result.startsWith('-!ERROR!-')) {
-      console.warn('MathCAT error:', result);
-      return null;
-    }
-    
-    return result;
+    speech = await withTimeout(
+      (() => {
+
+        if (currentMathcatOptions.style !== style) {
+          setMathcatPreference('SpeechStyle', style);
+        }
+        if (currentMathcatOptions.verbosity !== verbosity) {
+          setMathcatPreference('Verbosity', verbosity);
+        }
+        if (currentMathcatOptions.lang !== lang) {
+          setMathcatPreference('Language', lang);
+        }
+
+        currentMathcatOptions = {...options };
+
+        try {
+          const result = getSpeechTextFromMathcat(mathml);
+          
+          if (result.startsWith('-!ERROR!-')) {
+            console.warn('MathCAT error:', result);
+            return null;
+          }
+          
+          return result;
+        } catch (error) {
+          console.error('MathCAT speech generation failed:', error);
+          return null;
+        }
+      })(),
+      3000 // 3 second timeout
+    );
   } catch (error) {
-    console.error('MathCAT speech generation failed:', error);
-    return null;
+    if (error.message === 'Operation timed out') {
+      sendError(req, res, 504, 'mmlFromTeX request timed out', 'The server took too long to process the request.');
+    } else {
+      sendError(req, res, 500, 'Internal server error', error.message);
+    }
+  } finally {
+    mathCATLock.release(); // Always release, even on timeout
   }
+
+  return speech;
 }
 
 const generateSpeechWithSRE = async (mml, options) => {
@@ -138,9 +158,28 @@ const generateSpeechWithSRE = async (mml, options) => {
   }
 
   console.log('SRE Options:', JSON.stringify(SREOptions));
-  await SRE.engineReady();
-  await SRE.setupEngine(SREOptions);
-  const speech = SRE.toSpeech(mml);
+
+  let speech;
+  await SRELock.acquire();
+  try {
+    speech = await withTimeout(
+      (async () => {
+        await SRE.engineReady();
+        await SRE.setupEngine(SREOptions);
+        return SRE.toSpeech(mml);
+      })(),
+      3000 // 3 second timeout
+    );
+  } catch (error) {
+    if (error.message === 'Operation timed out') {
+      sendError(req, res, 504, 'SRE.toSpeech request timed out', 'The server took too long to process the request.');
+    } else {
+      sendError(req, res, 500, 'Internal server error', error.message);
+    }
+  } finally {
+    SRELock.release(); // Always release, even on timeout
+  }
+
   return speech;
 }
 
@@ -149,27 +188,87 @@ const generateSpeechText = async (mml, options) => {
   if(options.engine === 'sre') {
     return await generateSpeechWithSRE(mml, options);
   } else {
-    return generateSpeechWithMathCAT(mml, options);
+    return await generateSpeechWithMathCAT(mml, options);
   }
 }
 
 const speechTextFromTeX = async (latex, query = {}) => {
   const options = getSpeechOptionsFromQuery(query);
-  const mml = await mmlFromTeX(latex);
+
+  let mml;
+  await mathJaxLock.acquire();
+  try {
+    mml = await withTimeout(
+      (async () => {
+        // Generate SVG
+        return await mmlFromTeX(latex);
+      })(),
+      3000 // 3 second timeout
+    );
+  } catch (error) {
+    if (error.message === 'Operation timed out') {
+      sendError(req, res, 504, 'mmlFromTeX request timed out', 'The server took too long to process the request.');
+    } else {
+      sendError(req, res, 500, 'Internal server error', error.message);
+    }
+  } finally {
+    mathJaxLock.release(); // Always release, even on timeout
+  }
+
   const speechText = generateSpeechText(mml, options);
   return speechText;
 }
 
 const speechTextFromMathML = async (mathml, query = {}) => {
   const options = getSpeechOptionsFromQuery(query);
-  const mml = await mmlFromMathML(mathml);
+  
+  let mml;
+  await mathJaxLock.acquire();
+  try {
+    mml = await withTimeout(
+      (async () => {
+        // Generate SVG
+        return await mmlFromMathML(mathml);
+      })(),
+      3000 // 3 second timeout
+    );
+  } catch (error) {
+    if (error.message === 'Operation timed out') {
+      sendError(req, res, 504, 'mmlFromMathML request timed out', 'The server took too long to process the request.');
+    } else {
+      sendError(req, res, 500, 'Internal server error', error.message);
+    }
+  } finally {
+    mathJaxLock.release(); // Always release, even on timeout
+  }
+
   const speechText = generateSpeechText(mml, options);
   return speechText;
 }
 
 const speechTextFromAM = async (asciimath, query = {}) => {
   const options = getSpeechOptionsFromQuery(query);
-  const mml = await mmlFromAM(asciimath);
+  
+  let mml;
+  await mathJaxLock.acquire();
+  try {
+    mml = await withTimeout(
+      (async () => {
+        // Generate SVG
+        return await mmlFromAM(asciimath);
+      })(),
+      3000 // 3 second timeout
+    );
+  } catch (error) {
+    if (error.message === 'Operation timed out') {
+      sendError(req, res, 504, 'mmlFromMathML request timed out', 'The server took too long to process the request.');
+    } else {
+      sendError(req, res, 500, 'Internal server error', error.message);
+    }
+  } finally {
+    mathJaxLock.release(); // Always release, even on timeout
+  }
+
   const speechText = generateSpeechText(mml, options);
   return speechText;
 }

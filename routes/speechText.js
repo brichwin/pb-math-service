@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const cacheMiddleware = require('../middleware/cache');
 const { processFormula } = require('../utils');
+const { withTimeout, mathJaxLock } = require('../utils/locks');
 const { speechTextFromTeX, speechTextFromMathML, speechTextFromAM, getSpeechOptionsFromQuery, validateSpeechOptions } = require('../services/speechGenerators');
 const { sendError } = require('../utils/sendErrorHandler');
 
