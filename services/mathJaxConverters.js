@@ -1,6 +1,8 @@
 // node >=18
-
 const { toBool, toNum } = require("../utils");
+
+let currentPackageSignature = 'mathjax needs loading';
+let mathJaxReady = null;
 
 const CoreV3ish = [
   // mirrors MathJax v3's AllPackages
@@ -30,54 +32,137 @@ const CoreV3ish = [
   "textcomp",
 ];
 
-// Add the extras you want:
-const WantedPackages = [...new Set([...CoreV3ish, "mhchem", "physics"])];
+/**
+ * Extract required packages from a TeX string
+ * @param {string} tex - The TeX string to analyze
+ * @returns {string[]} Array of required package names
+ */
+function extractRequiredPackages(tex) {
+  const requireRegex = /\\require\{([^}]+)\}/g;
+  const packages = [];
+  let match;
+  
+  while ((match = requireRegex.exec(tex)) !== null) {
+    packages.push(match[1].trim());
+  }
+  
+  return packages.sort(); // Sort for consistent signature
+}
 
-global.MathJax = {
-  loader: {
-    paths: { mathjax: "@mathjax/src/bundle" },
-    require: require,
-    load: [
-      "input/tex",
-      "input/mml",
-      "input/asciimath",
-      "output/svg",
-      "adaptors/liteDOM",
-      "ui/safe",
-      // Load the TeX extensions as components (prefixed form):
-      ...WantedPackages.map((p) => `[tex]/${p}`),
-    ],
-  },
-  startup: { typeset: false },
-  tex: {
-    // enable the packages in the TeX input jax
-    packages: { "[+]": WantedPackages },
-    inlineMath: [
-      ["$", "$"],
-      ["\\(", "\\)"],
-    ],
-    displayMath: [
-      ["$$", "$$"],
-      ["\\[", "\\]"],
-    ],
-  },
-  svg: {
-    fontCache: "local",
-    font: "mathjax-newcm",
-  },
-};
+/**
+ * Create a signature string from package array
+ * @param {string[]} packages - Array of package names
+ * @returns {string} Signature string for comparison
+ */
+function createPackageSignature(packages) {
+  return packages.length > 0 ? packages.join(',') : 'default';
+}
 
-// Load the startup component and wait for it
-require("@mathjax/src/bundle/startup.js");
+/**
+ * Check if MathJax needs to be reset due to package changes
+ * @param {string[]} requiredPackages - Array of required packages
+ * @returns {boolean} True if reset is needed
+ */
+function needsMathJaxReset(requiredPackages) {
+  const newSignature = createPackageSignature(requiredPackages);
+  
+  if (currentPackageSignature !== newSignature) {
+    console.log(`Package signature changed: ${currentPackageSignature} -> ${newSignature}`);
+    return true;
+  }
+  
+  return false;
+}
 
-const mathJaxReady = MathJax.startup.promise
-  .then(() => {
-    console.log("✓ MathJax initialized successfully");
-  })
-  .catch((err) => {
-    console.error("✗ MathJax initialization error:", err.message);
-    throw err;
+/**
+ * Reset and reinitialize MathJax with new package configuration
+ * @param {string[]} requiredPackages - Array of required packages
+ * @returns {Promise} Promise that resolves when MathJax is ready
+ */
+async function configureMathJax(requiredPackages=[]) {
+  console.log('Configuring MathJax with packages:', requiredPackages);
+  
+  // Clear the current MathJax instance
+  delete global.MathJax;
+  
+  // Create package list
+  const allPackages = [...new Set([...CoreV3ish, "mhchem", ...requiredPackages])];
+  
+  // Reinitialize MathJax configuration
+  global.MathJax = {
+    loader: {
+      paths: { mathjax: "@mathjax/src/bundle" },
+      require: require,
+      load: [
+        "input/tex",
+        "input/mml",
+        "input/asciimath",
+        "output/svg",
+        "adaptors/liteDOM",
+        "ui/safe",
+        // Load the TeX extensions as components (prefixed form):
+        ...allPackages.map((p) => `[tex]/${p}`),
+      ],
+    },
+    startup: { typeset: false },
+    tex: {
+      // enable the packages in the TeX input jax
+      packages: { "[+]": allPackages },
+      inlineMath: [
+        ["$", "$"],
+        ["\\(", "\\)"],
+      ],
+      displayMath: [
+        ["$$", "$$"],
+        ["\\[", "\\]"],
+      ],
+    },
+    svg: {
+      fontCache: "local",
+      font: "mathjax-newcm",
+    },
+  };
+
+  // Clear the module cache for MathJax components
+  Object.keys(require.cache).forEach(key => {
+    if (key.includes('@mathjax') || key.includes('mathjax')) {
+      delete require.cache[key];
+    }
   });
+
+  // Reload and reinitialize
+  require("@mathjax/src/bundle/startup.js");
+  
+  const mathJaxReady = MathJax.startup.promise
+    .then(() => {
+      console.log(`✓ MathJax initialized with packages: ${allPackages.join(', ')}`);
+      currentPackageSignature = createPackageSignature(requiredPackages);
+    })
+    .catch((err) => {
+      console.error("✗ MathJax initialization error:", err.message);
+      throw err;
+    });
+    
+
+  return mathJaxReady;
+}
+
+/**
+ * Ensure MathJax is ready with the correct packages
+ * @param {string} tex - The TeX string (to extract required packages)
+ * @returns {Promise} Promise that resolves when MathJax is ready
+ */
+async function ensureMathJaxReady(tex = '') {
+  const requiredPackages = extractRequiredPackages(tex);
+  
+  // Check if we need to reset MathJax
+  if (needsMathJaxReset(requiredPackages)) {
+    return configureMathJax(requiredPackages);
+  }
+  
+  // Use existing MathJax instance
+  return mathJaxReady || mathJaxReady;
+}
 
 /**
  * Helper function to remove semantic attributes from SVG or MathML strings.
@@ -251,12 +336,13 @@ const makeSvgStandAlone = (svg, fgColor) => {
 
 /**
  * Converts TeX mathematical notation to clean MathML markup.
+ * Automatically handles package requirements and MathJax reinitialization.
  * @param {string} tex - The TeX mathematical expression to convert
  * @returns {Promise<string>} Promise that resolves to clean MathML markup
  * @throws {Error} If MathJax fails to convert the TeX expression
  */
 const mmlFromTeX = async (tex) => {
-  await mathJaxReady;
+  await ensureMathJaxReady(tex);
   const mml = await MathJax.tex2mmlPromise(tex);
   return scrub(mml);
 };
@@ -288,16 +374,10 @@ const mmlFromMathML = async (mathml) => {
 
 /**
  * Converts TeX mathematical notation to standalone SVG image.
- * Supports scaling and color customization options.
+ * Automatically handles package requirements and MathJax reinitialization.
  * @param {string} tex - The TeX mathematical expression to convert
  * @param {Object} [options={}] - Optional configuration object for MathJax rendering
- * @param {boolean} [options.display] - Whether to render in display mode
- * @param {number} [options.em] - Font size in em units
- * @param {number} [options.ex] - Ex-height in pixels
- * @param {number} [options.containerWidth] - Container width for line breaking
- * @param {number} [options.scale] - Scale factor for SVG dimensions
- * @param {string} [options.family] - Font family to use
- * @param {string} fgColor - Hex color value (3 or 6 digits, without # prefix) for foreground
+ * @param {string} fgColor - Hex color value for foreground
  * @returns {Promise<string>} Promise that resolves to standalone SVG markup
  * @throws {Error} If MathJax fails to convert the TeX expression
  */
@@ -307,7 +387,7 @@ const svgFromTeX = async (tex, options = {}, fgColor) => {
     delete options.scale;
   }
 
-  await mathJaxReady;
+  await ensureMathJaxReady(tex);
   const svgNode = await MathJax.tex2svgPromise(tex, options);
   return applySvgColor(
     makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale), fgColor),
@@ -399,7 +479,7 @@ const buildMathConversionOptions = (query = {}) => {
     display: true,
     em: 16,
     ex: 8,
-    containerWidth: undefined, // we'll compute this below
+    containerWidth: undefined, // computed this below
     scale: 1,
   };
 
@@ -469,8 +549,11 @@ const getMathJaxInfo = () => {
   return { version, packages, versions };
 };
 
+configureMathJax(); // initial load
+
 module.exports = {
   mathJaxReady,
+  ensureMathJaxReady,
   buildMathConversionOptions,
   mmlFromTeX,
   mmlFromAM,
