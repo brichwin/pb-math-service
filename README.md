@@ -137,13 +137,15 @@ route returns a string starting with "Error" and the error message.
 
 - **Caching**: URL-level LRU cache with configurable size limits
 
-## Development
-
 ### Running Tests
 
 ```bash
 npm test
 ```
+
+### Manual Tests / Playround
+
+Use `test/mathServicePlayground.html`
 
 ## License
 
