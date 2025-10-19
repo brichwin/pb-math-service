@@ -2,6 +2,20 @@ const { expect } = require('chai');
 const request = require('supertest');
 const app = require('../app');
 
+const extractMessageFromSvg = (svgString) => {
+  if (!svgString || typeof svgString !== 'string') {
+    throw new Error('Invalid SVG string');
+  }
+  
+  const match = svgString.match(/<text[^>]*>([\s\S]*?)<\/text>/);
+  
+  if (!match) {
+    throw new Error('No text element found in SVG');
+  }
+  
+  return match[1].trim();
+}
+
 describe('MathML Route Tests', () => {
   const validMathML = '<math><mi>x</mi><mo>=</mo><mn>2</mn></math>';
   const complexMathML = '<math><mrow><mi>E</mi><mo>=</mo><mi>m</mi><msup><mi>c</mi><mn>2</mn></msup></mrow></math>';
@@ -159,11 +173,15 @@ describe('MathML Route Tests', () => {
       request(app)
         .get('/mathml')
         .query({})
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /svg/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
-          expect(res.body.error).to.include('mathml');
+          const svgContent = res.text || res.body.toString();
+          expect(svgContent).to.include('<svg');
+          const message = extractMessageFromSvg(svgContent);
+          expect(message).to.include('Missing required parameter', 
+            `Expected message to include 'Missing required parameter' but got: "${message}"`);
           done();
         });
     });
@@ -172,10 +190,15 @@ describe('MathML Route Tests', () => {
       request(app)
         .get('/mathml')
         .query({ mathml: '' })
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /svg/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
+          const svgContent = res.text || res.body.toString();
+          expect(svgContent).to.include('<svg');
+          const message = extractMessageFromSvg(svgContent);
+          expect(message).to.include('Missing required parameter', 
+            `Expected message to include 'Missing required parameter' but got: "${message}"`);
           done();
         });
     });

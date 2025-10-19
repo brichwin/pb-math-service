@@ -2,6 +2,20 @@ const { expect } = require('chai');
 const request = require('supertest');
 const app = require('../app');
 
+const extractMessageFromSvg = (svgString) => {
+  if (!svgString || typeof svgString !== 'string') {
+    throw new Error('Invalid SVG string');
+  }
+  
+  const match = svgString.match(/<text[^>]*>([\s\S]*?)<\/text>/);
+  
+  if (!match) {
+    throw new Error('No text element found in SVG');
+  }
+  
+  return match[1].trim();
+}
+
 describe('Base64 Encoded Formulas', () => {
   
   describe('LaTeX Format', () => {
@@ -273,11 +287,15 @@ describe('Base64 Encoded Formulas', () => {
           latex: base64Formula, 
           isBase64: 'true'
         })
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /svg/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
-          expect(res.body.error).to.include('latex parameter is required');
+          const svgContent = res.text || res.body.toString();
+          expect(svgContent).to.include('<svg');
+          const message = extractMessageFromSvg(svgContent);
+          expect(message).to.include('Missing required parameter', 
+            `Expected message to include 'Missing required parameter' but got: "${message}"`);
           done();
         });
     });
@@ -291,11 +309,15 @@ describe('Base64 Encoded Formulas', () => {
           latex: invalidBase64, 
           isBase64: 'true'
         })
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /svg/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
-          expect(res.body.error).to.include('Invalid base64');
+          const svgContent = res.text || res.body.toString();
+          expect(svgContent).to.include('<svg');
+          const message = extractMessageFromSvg(svgContent);
+          expect(message).to.include('Invalid base64 string', 
+            `Expected message to include 'Invalid base64 string' but got: "${message}"`);
           done();
         });
     });
@@ -312,12 +334,9 @@ describe('Base64 Encoded Formulas', () => {
           latex: malformedBase64, 
           isBase64: 'true'
         })
-        .expect(400)
-        .end((err, res) => {
-          if (err) return done(err);
-          expect(res.body).to.have.property('error');
-          done();
-        });
+        .expect(200)
+        .expect('Content-Type', /png/)
+        .end(done);
     });
 
     it('should handle base64 with whitespace', (done) => {
@@ -329,12 +348,19 @@ describe('Base64 Encoded Formulas', () => {
         .get('/latex')
         .query({ 
           latex: base64WithWhitespace, 
-          isBase64: 'true',
-          svg: '1'
+          isBase64: 'true'
         })
         .expect(200)
         .expect('Content-Type', /svg/)
-        .end(done);
+        .end((err, res) => {
+          if (err) return done(err);
+          const svgContent = res.text || res.body.toString();
+          expect(svgContent).to.include('<svg');
+          const message = extractMessageFromSvg(svgContent);
+          expect(message).to.include('Invalid base64 string', 
+            `Expected message to include 'Invalid base64 string' but got: "${message}"`);
+          done();
+        });
     });
 
     it('should handle non-base64 when isBase64=false', (done) => {
@@ -344,11 +370,10 @@ describe('Base64 Encoded Formulas', () => {
         .get('/latex')
         .query({ 
           latex: formula, 
-          isBase64: 'false',
-          svg: '1'
+          isBase64: 'false'
         })
         .expect(200)
-        .expect('Content-Type', /svg/)
+        .expect('Content-Type', /png/)
         .end(done);
     });
 

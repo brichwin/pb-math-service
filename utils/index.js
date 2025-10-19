@@ -37,6 +37,28 @@ function getNumberParam(value, min, max, defaultValue) {
   return value;
 }
 
+
+const truncateMiddle = (str, maxLength=80) => {
+  if (str.length <= maxLength) {
+    return str;
+  }
+  
+  const ellipsis = ' ... ';
+  const ellipsisLength = ellipsis.length;
+  
+  // Not enough room for ellipsis
+  if (maxLength <= ellipsisLength) {
+    return str.substring(0, maxLength);
+  }
+  
+  // Calculate how many chars to keep
+  const charsToKeep = maxLength - ellipsisLength;
+  const startChars = Math.ceil(charsToKeep / 2);
+  const endChars = Math.floor(charsToKeep / 2);
+  
+  return str.substring(0, startChars) + ellipsis + str.substring(str.length - endChars);
+}
+
 /**
  * Checks that required query parameters are present.
  * @param {Object} query - The req.query object.
@@ -99,14 +121,13 @@ const processFormula = (req, res, formula) => {
   if (toBool(req.query.isBase64) && formula) {
     try {
       formula = urlSafeBase64ToBase64(formula);
-      console.log("processFormula: urlSafeBase64ToBase64 applied:", formula);
       if(!isBase64(formula)) {
         console.error("processFormula: Not valid base64");
         throw new Error("Not valid base64");
       }
       formula = Buffer.from(formula, "base64").toString("utf-8").trim();
     } catch (error) {
-      console.error("processFormula: Error decoding base64", error);
+      console.error("processFormula: Error decoding base64");
       sendError(req, res, 400, "Invalid base64 string", "The provided formula is not a valid base64 encoded string");
       return null;
     }
@@ -125,5 +146,6 @@ module.exports = {
   toNum,
   getNumberParam,
   requiredParamsAreMissing,
-  processFormula
+  processFormula, 
+  truncateMiddle
 };

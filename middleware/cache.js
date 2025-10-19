@@ -1,5 +1,6 @@
 const { LRUCache } = require('lru-cache');
 const config = require('../config');
+const { truncateMiddle } = require('../utils');
 
 // Create cache once at module load
 const responseCache = new LRUCache({
@@ -45,9 +46,9 @@ function cacheMiddleware(req, res, next) {
     
     return res.send(cached.buffer);
   }
-  
-  console.log('Cache miss:', cacheKey);
-  
+
+  console.log('Cache miss:', truncateMiddle(cacheKey, 80));
+
   // Intercept res.send
   const originalSend = res.send.bind(res);
   
@@ -66,7 +67,7 @@ function cacheMiddleware(req, res, next) {
           timestamp: Date.now(),
         });
         
-        console.log('Cached:', cacheKey, `(${buffer.length} bytes)`);
+        console.log('Cached:', truncateMiddle(cacheKey, 80), `(${buffer.length} bytes)`);
       } catch (error) {
         console.error('Failed to cache:', error);
       }

@@ -3,7 +3,7 @@ const router = express.Router();
 const cacheMiddleware = require('../middleware/cache');
 const { buildMathConversionOptions, svgFromTeX } = require('../services/mathJaxConverters');
 const { buildPngFromSvgConversionOptions, pngFromSvg } = require('../services/imageConverter');
-const { toBool, requiredParamsAreMissing, processFormula } = require('../utils');
+const { toBool, requiredParamsAreMissing, processFormula, truncateMiddle } = require('../utils');
 const { withTimeout, mathJaxLock, imageConverterLock} = require('../utils/locks');
 const { sendError } = require('../utils/sendErrorHandler');
 
@@ -17,7 +17,7 @@ router.get('/', async (req, res, next) => {
     const formula = processFormula(req, res, latex);
     if (!formula) return; // processFormula already handled the response in case of error
 
-    console.log('Processed formula:', formula);
+    console.log('Processed formula:', truncateMiddle(formula, 80));
     const mathConversionOptions = buildMathConversionOptions(req.query);
     const pngConversionOptions = buildPngFromSvgConversionOptions(req.query);
 

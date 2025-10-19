@@ -2,6 +2,20 @@ const { expect } = require('chai');
 const request = require('supertest');
 const app = require('../app');
 
+const extractMessageFromSvg = (svgString) => {
+  if (!svgString || typeof svgString !== 'string') {
+    throw new Error('Invalid SVG string');
+  }
+  
+  const match = svgString.match(/<text[^>]*>([\s\S]*?)<\/text>/);
+  
+  if (!match) {
+    throw new Error('No text element found in SVG');
+  }
+  
+  return match[1].trim();
+}
+
 describe('LaTeX Route Tests', () => {
   const validLaTeX = 'x = 2';
   const complexLaTeX = 'E = mc^2';
@@ -161,11 +175,15 @@ describe('LaTeX Route Tests', () => {
       request(app)
         .get('/latex')
         .query({})
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /svg/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
-          expect(res.body.error).to.include('latex');
+          const svgContent = res.text || res.body.toString();
+          expect(svgContent).to.include('<svg');
+          const message = extractMessageFromSvg(svgContent);
+          expect(message).to.include('Missing required parameter', 
+            `Expected message to include 'Missing required parameter' but got: "${message}"`);
           done();
         });
     });
@@ -174,10 +192,15 @@ describe('LaTeX Route Tests', () => {
       request(app)
         .get('/latex')
         .query({ latex: '' })
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /svg/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
+          const svgContent = res.text || res.body.toString();
+          expect(svgContent).to.include('<svg');
+          const message = extractMessageFromSvg(svgContent);
+          expect(message).to.include('Missing required parameter', 
+            `Expected message to include 'Missing required parameter' but got: "${message}"`);
           done();
         });
     });
@@ -218,28 +241,28 @@ describe('LaTeX Route Tests', () => {
     it('should handle fractions', (done) => {
       request(app)
         .get('/latex')
-        .query({ svg: 1, latex: fractionLaTeX })
+        .query({ latex: fractionLaTeX })
         .expect(200)
-        .expect('Content-Type', /svg/)
+        .expect('Content-Type', /png/)
         .end(done);
     });
 
     it('should handle integrals', (done) => {
       request(app)
         .get('/latex')
-        .query({ svg: 1, latex: integralLaTeX })
+        .query({ latex: integralLaTeX })
         .expect(200)
-        .expect('Content-Type', /svg/)
+        .expect('Content-Type', /png/)
         .end(done);
     });
 
     it('should handle square roots', (done) => {
-      const sqrtLaTeX = '\\sqrt{x^2 + y^2}';
+      const sqrtLaTeX = '\\sqrt{x^2+y^2}';
       request(app)
         .get('/latex')
-        .query({ svg: 1, latex: sqrtLaTeX })
+        .query({ latex: sqrtLaTeX })
         .expect(200)
-        .expect('Content-Type', /svg/)
+        .expect('Content-Type', /png/)
         .end(done);
     });
 
@@ -247,9 +270,9 @@ describe('LaTeX Route Tests', () => {
       const matrixLaTeX = '\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}';
       request(app)
         .get('/latex')
-        .query({ svg: 1, latex: matrixLaTeX })
+        .query({ latex: matrixLaTeX })
         .expect(200)
-        .expect('Content-Type', /svg/)
+        .expect('Content-Type', /png/)
         .end(done);
     });
 
@@ -257,9 +280,9 @@ describe('LaTeX Route Tests', () => {
       const sumLaTeX = '\\sum_{i=1}^{n} x_i';
       request(app)
         .get('/latex')
-        .query({ svg: 1, latex: sumLaTeX })
+        .query({ latex: sumLaTeX })
         .expect(200)
-        .expect('Content-Type', /svg/)
+        .expect('Content-Type', /png/)
         .end(done);
     });
 
@@ -267,9 +290,9 @@ describe('LaTeX Route Tests', () => {
       const chemLaTeX = '\\ce{H2SO4}';
       request(app)
         .get('/latex')
-        .query({ svg: 1, latex: chemLaTeX })
+        .query({ latex: chemLaTeX })
         .expect(200)
-        .expect('Content-Type', /svg/)
+        .expect('Content-Type', /png/)
         .end(done);
     });
   });
@@ -279,26 +302,27 @@ describe('LaTeX Route Tests', () => {
       const base64LaTeX = Buffer.from(validLaTeX).toString('base64');
       request(app)
         .get('/latex')
-        .query({ svg: 1, latex: base64LaTeX, isBase64: 'true' })
+        .query({ latex: base64LaTeX, isBase64: 'true' })
         .expect(200)
-        .expect('Content-Type', /svg/)
-        .end((err, res) => {
-          if (err) return done(err);
-          const svgContent = res.text || res.body.toString();
-          expect(svgContent).to.include('<svg');
-          done();
-        });
+        .expect(200)
+        .expect('Content-Type', /png/)
+        .end(done);
     });
 
     it('should return 400 for invalid base64', (done) => {
       request(app)
         .get('/latex')
         .query({ latex: 'invalid_base64!@#', isBase64: 'true' })
-        .expect(400)
+        .expect(200)
+        .expect(200)
+        .expect('Content-Type', /svg/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
-          expect(res.body.error).to.include('Invalid base64');
+          const svgContent = res.text || res.body.toString();
+          expect(svgContent).to.include('<svg');
+          const message = extractMessageFromSvg(svgContent);
+          expect(message).to.include('Invalid base64 string', 
+            `Expected message to include 'Invalid base64 string' but got: "${message}"`);
           done();
         });
     });

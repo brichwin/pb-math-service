@@ -2,6 +2,20 @@ const { expect } = require('chai');
 const request = require('supertest');
 const app = require('../app');
 
+const extractMessageFromSvg = (svgString) => {
+  if (!svgString || typeof svgString !== 'string') {
+    throw new Error('Invalid SVG string');
+  }
+  
+  const match = svgString.match(/<text[^>]*>([\s\S]*?)<\/text>/);
+  
+  if (!match) {
+    throw new Error('No text element found in SVG');
+  }
+  
+  return match[1].trim();
+}
+
 describe('Speech Text Route Tests', () => {
   const validLaTeX = 'x^2 + y^2 = z^2';
   const validAsciiMath = 'x^2 + y^2 = z^2';
@@ -21,6 +35,8 @@ describe('Speech Text Route Tests', () => {
             if (err) return done(err);
             expect(res.text).to.be.a('string');
             expect(res.text.length).to.be.greaterThan(0);
+            expect(res.text).to.include('x squared plus y squared, is equal', 
+            `Expected message to include 'x squared plus y squared, is equal' but got: "${res.text}"`);
             done();
           });
       });
@@ -40,6 +56,8 @@ describe('Speech Text Route Tests', () => {
             if (err) return done(err);
             expect(res.text).to.be.a('string');
             expect(res.text.length).to.be.greaterThan(0);
+            expect(res.text).to.include('x squared plus y squared, is equal', 
+            `Expected message to include 'x squared plus y squared, is equal' but got: "${res.text}"`);
             done();
           });
       });
@@ -63,6 +81,9 @@ describe('Speech Text Route Tests', () => {
               if (err) return done(err);
               expect(res.text).to.be.a('string');
               expect(res.text.length).to.be.greaterThan(0);
+              expect(res.text).to.include('a over b', 
+                `Expected message to include 'a over b' but got: "${res.text}"`);
+
               completedTests++;
               if (completedTests === verbosities.length) {
                 done();
@@ -88,6 +109,8 @@ describe('Speech Text Route Tests', () => {
             if (err) return done(err);
             expect(res.text).to.be.a('string');
             expect(res.text.length).to.be.greaterThan(0);
+            expect(res.text).to.include('x squared plus y squared equals z squared', 
+              `Expected message to include 'x squared plus y squared equals z squared' but got: "${res.text}"`);
             done();
           });
       });
@@ -323,10 +346,14 @@ describe('Speech Text Route Tests', () => {
       request(app)
         .get('/speechtext')
         .query({})
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /text/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
+          expect(res.text).to.be.a('string');
+          expect(res.text.length).to.be.greaterThan(0);
+          expect(res.text).to.include('Error: Missing required parameter', 
+            `Expected message to include 'Error: Missing required parameter' but got: "${res.text}"`);
           done();
         });
     });
@@ -338,11 +365,14 @@ describe('Speech Text Route Tests', () => {
           latex: validLaTeX,
           engine: 'invalidengine'
         })
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /text/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
-          expect(res.body.error).to.include('Invalid engine');
+          expect(res.text).to.be.a('string');
+          expect(res.text.length).to.be.greaterThan(0);
+          expect(res.text).to.include('Error: Invalid speech options', 
+            `Expected message to include 'Error: Invalid speech options' but got: "${res.text}"`);
           done();
         });
     });
@@ -355,11 +385,14 @@ describe('Speech Text Route Tests', () => {
           engine: 'mathcat',
           style: 'invalidstyle'
         })
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /text/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
-          expect(res.body.error).to.include('Invalid style');
+          expect(res.text).to.be.a('string');
+          expect(res.text.length).to.be.greaterThan(0);
+          expect(res.text).to.include('Error: Invalid speech options', 
+            `Expected message to include 'Error: Invalid speech options' but got: "${res.text}"`);
           done();
         });
     });
@@ -373,11 +406,14 @@ describe('Speech Text Route Tests', () => {
           style: 'ClearSpeak',
           verbosity: 'invalidverbosity'
         })
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /text/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
-          expect(res.body.error).to.include('Invalid verbosity');
+          expect(res.text).to.be.a('string');
+          expect(res.text.length).to.be.greaterThan(0);
+          expect(res.text).to.include('Error: Invalid speech options', 
+            `Expected message to include 'Error: Invalid speech options' but got: "${res.text}"`);
           done();
         });
     });
@@ -389,11 +425,14 @@ describe('Speech Text Route Tests', () => {
           latex: 'invalid_base64!@#',
           isBase64: 'true'
         })
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /text/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
-          expect(res.body.error).to.include('Invalid base64');
+          expect(res.text).to.be.a('string');
+          expect(res.text.length).to.be.greaterThan(0);
+          expect(res.text).to.include('Error: Invalid base64 string', 
+            `Expected message to include 'Error: Invalid base64 string' but got: "${res.text}"`);
           done();
         });
     });
@@ -405,10 +444,14 @@ describe('Speech Text Route Tests', () => {
           latex: validLaTeX,
           mathml: validMathML
         })
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /text/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
+          expect(res.text).to.be.a('string');
+          expect(res.text.length).to.be.greaterThan(0);
+          expect(res.text).to.include('x squared plus y squared, is equal to z squared', 
+            `Expected message to include 'x squared plus y squared, is equal to z squared' but got: "${res.text}"`);
           done();
         });
     });

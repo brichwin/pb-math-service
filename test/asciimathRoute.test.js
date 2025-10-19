@@ -2,6 +2,20 @@ const { expect } = require('chai');
 const request = require('supertest');
 const app = require('../app');
 
+const extractMessageFromSvg = (svgString) => {
+  if (!svgString || typeof svgString !== 'string') {
+    throw new Error('Invalid SVG string');
+  }
+  
+  const match = svgString.match(/<text[^>]*>([\s\S]*?)<\/text>/);
+  
+  if (!match) {
+    throw new Error('No text element found in SVG');
+  }
+  
+  return match[1].trim();
+}
+
 describe('AsciiMath Route Tests', () => {
   const validAsciiMath = 'x = 2';
   const complexAsciiMath = 'E = mc^2';
@@ -157,27 +171,36 @@ describe('AsciiMath Route Tests', () => {
   });
 
   describe('Error Handling', () => {
-    it('should return 400 for missing AsciiMath', (done) => {
+    it('should return SVG error msg for missing AsciiMath', (done) => {
       request(app)
         .get('/asciimath')
         .query({})
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /svg/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
-          expect(res.body.error).to.include('asciimath');
+          const svgContent = res.text || res.body.toString();
+          expect(svgContent).to.include('<svg');
+          const message = extractMessageFromSvg(svgContent);
+          expect(message).to.include('Missing required parameter', 
+            `Expected message to include 'Missing required parameter' but got: "${message}"`);
           done();
         });
     });
 
-    it('should return 400 for empty AsciiMath', (done) => {
+    it('should return SVG error msg for empty AsciiMath', (done) => {
       request(app)
         .get('/asciimath')
         .query({ asciimath: '' })
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /svg/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
+          const svgContent = res.text || res.body.toString();
+          expect(svgContent).to.include('<svg');
+          const message = extractMessageFromSvg(svgContent);
+          expect(message).to.include('Missing required parameter', 
+            `Expected message to include 'Missing required parameter' but got: "${message}"`);
           done();
         });
     });
@@ -314,11 +337,15 @@ describe('AsciiMath Route Tests', () => {
       request(app)
         .get('/asciimath')
         .query({ asciimath: 'invalid_base64!@#', isBase64: 'true' })
-        .expect(400)
+        .expect(200)
+        .expect('Content-Type', /svg/)
         .end((err, res) => {
           if (err) return done(err);
-          expect(res.body).to.have.property('error');
-          expect(res.body.error).to.include('Invalid base64');
+          const svgContent = res.text || res.body.toString();
+          expect(svgContent).to.include('<svg');
+          const message = extractMessageFromSvg(svgContent);
+          expect(message).to.include('Invalid base64 string', 
+            `Expected message to include 'Invalid base64 string' but got: "${message}"`);
           done();
         });
     });
