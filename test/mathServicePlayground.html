@@ -152,6 +152,14 @@ textarea {
             <div class="row"><label for="width">width (px)</label><input id="width" type="number" step="1" ></div>
             <div class="row"><label for="lineWidth">lineWidth (px)</label><input id="lineWidth" type="number" step="1" ></div>
             <div class="row"><label for="scale">scale</label><input id="scale" type="number" step="0.1" ></div>
+            <div class="row">
+              <label for="display">Display</label>
+              <select id="display">
+                <option value="">Default</option>
+                <option value="1">Yes (display=1)</option>
+                <option value="0">No (display=0)</option>
+              </select>
+            </div>
           </div>
         </fieldset>
 
@@ -221,6 +229,7 @@ textarea {
       const width = el('width');
       const lineWidth = el('lineWidth');
       const scale = el('scale');
+      const display = el('display');
       const isBase64 = el('isBase64');
       const urlOut = el('urlOut');
       const previewCanvas = el('previewCanvas');
@@ -258,6 +267,7 @@ textarea {
         if(width.value) qp.set('width', width.value.trim());
         if(lineWidth.value) qp.set('lineWidth', lineWidth.value.trim());
         if(scale.value) qp.set('scale', scale.value.trim());
+        if(display.value) qp.set('display', display.value.trim());
 
         return `${base}${path}?${qp.toString()}`;
       }
@@ -392,7 +402,7 @@ async function renderPreview(url) {
         btn.addEventListener('click', ()=>{
           const [kind, name] = (btn.getAttribute('data-example')||'').split(':');
           mode.value = kind; format.value = 'png'; isBase64.value = 'false';
-          fg.value = ''; font.value = ''; dpi.value='300'; em.value=''; ex.value=''; width.value=''; lineWidth.value=''; scale.value='';
+          fg.value = ''; font.value = ''; dpi.value='300'; em.value=''; ex.value=''; width.value=''; lineWidth.value=''; scale.value=''; display.value='';
           switch(name){
             case 'Quadratic': expr.value = '\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}'; break;
             case 'SumCubes': expr.value = 'sum_(i=1)^n i^3 = (n(n+1)/2)^2'; break;
