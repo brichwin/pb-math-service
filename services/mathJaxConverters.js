@@ -404,8 +404,8 @@ const svgFromTeX = async (tex, options = {}, fgColor) => {
 /**
  * Converts AsciiMath notation to standalone SVG image.
  * @param {string} asciimath - The AsciiMath expression to convert
- * @param {Object} [options] - Optional configuration object for MathJax rendering
- * @param {boolean} [options.display] - Whether to render in display mode
+ * @param {Object} [options={}] - Optional configuration object for MathJax rendering
+ * @param {boolean} [options.display] - Whether to render in display mode (forced to true)
  * @param {number} [options.em] - Font size in em units
  * @param {number} [options.ex] - Ex-height in pixels
  * @param {number} [options.containerWidth] - Container width for line breaking
@@ -420,12 +420,12 @@ const svgFromAM = async (asciimath, options = {}, fgColor) => {
   if ("scale" in options) {
     delete options.scale;
   }
-    // MathJax asciimath2svgPromise returns multiple SVGs for inline math if not in display mode
+  // MathJax asciimath2svgPromise returns multiple SVGs for inline math if not in display mode
   options.display = true;
   await mathJaxReady;
   const svgNode = await MathJax.asciimath2svgPromise(asciimath, options);
   return applySvgColor(
-    makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale)),
+    makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale), fgColor),
     fgColor
   );
 };
@@ -433,8 +433,8 @@ const svgFromAM = async (asciimath, options = {}, fgColor) => {
 /**
  * Converts MathML markup to standalone SVG image.
  * @param {string} mathml - The MathML markup to convert
- * @param {Object} [options] - Optional configuration object for MathJax rendering
- * @param {boolean} [options.display] - Whether to render in display mode
+ * @param {Object} [options={}] - Optional configuration object for MathJax rendering
+ * @param {boolean} [options.display] - Whether to render in display mode (forced to true)
  * @param {number} [options.em] - Font size in em units
  * @param {number} [options.ex] - Ex-height in pixels
  * @param {number} [options.containerWidth] - Container width for line breaking
@@ -454,7 +454,7 @@ const svgFromMathML = async (mathml, options = {}, fgColor) => {
   await mathJaxReady;
   const svgNode = await MathJax.mathml2svgPromise(mathml, options);
   return applySvgColor(
-    makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale)),
+    makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale), fgColor),
     fgColor
   );
 };
@@ -533,6 +533,7 @@ const buildMathConversionOptions = (query = {}) => {
  * @returns {Object} Object containing MathJax version and package information
  * @returns {string} returns.version - MathJax version string or "unknown"
  * @returns {string[]} returns.packages - Array of loaded TeX package names
+ * @returns {string[]} returns.versions - Array of component version strings
  */
 const getMathJaxInfo = () => {
   const mj = global.MathJax || {};
