@@ -72,10 +72,11 @@ function getDefaultVerbosity(engine, style) {
 
 function getValidOptions() {
   return {
-    engines: ['mathcat', 'mathjax'],
+    engines: ['mathcat', 'sre'],
+    defaultEngine: 'mathcat',
     mathcat: {
       styles: {
-        ClearSpeak: ['Verbose'],
+        ClearSpeak: ['Verbose', 'Medium', 'Terse'],
         SimpleSpeak: ['Verbose', 'Medium', 'Terse'],
       },
       defaults: {
@@ -90,7 +91,7 @@ function getValidOptions() {
       },
       defaults: {
         style: 'ClearSpeak',
-        verbosity: 'Auto',
+        verbosity: 'Explicit',
       },
     },
   };

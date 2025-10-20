@@ -116,7 +116,7 @@ textarea {
           <div class="examples" style="margin-top:.5rem">
             <button type="button" class="btn" data-example="latex:Quadratic">Quadratic (LaTeX)</button>
             <button type="button" class="btn" data-example="asciimath:SumCubes">Sum of Cubes (AsciiMath)</button>
-            <button type="button" class="btn" data-example="mathml:InlineX">Simple x (MathML)</button>
+            <button type="button" class="btn" data-example="mathml:SquareRoot">Square Root (MathML)</button>
             <button type="button" class="btn" data-example="latex:Integral">Gaussian Integral (LaTeX)</button>
           </div>
         </details>
@@ -155,9 +155,9 @@ textarea {
             <div class="row">
               <label for="display">Display</label>
               <select id="display">
-                <option value="">Default</option>
-                <option value="1">Yes (display=1)</option>
-                <option value="0">No (display=0)</option>
+                <option value="blank">Blank (default)</option>
+                <option value="yes">Yes (add <code class="inline">display=1</code>)</option>
+                <option value="no">No (add <code class="inline">display=0</code>)</option>
               </select>
             </div>
           </div>
@@ -168,11 +168,44 @@ textarea {
           <div class="row">
             <label for="isBase64">URL-safe Base64</label>
             <select id="isBase64">
-              <option value="false">No</option>
+              <option value="blank">Blank (default)</option>
               <option value="true">Yes (add <code class="inline">isBase64=true</code>)</option>
+              <option value="false">No (add <code class="inline">isBase64=false</code>)</option>
             </select>
           </div>
           <p class="hint">When enabled, the expression is base64-encoded with +→- and /→_, and trailing = removed.</p>
+        </fieldset>
+
+        <fieldset class="content">
+          <legend>Speech Text Settings</legend>
+          <div class="kvs">
+            <div class="row">
+              <label for="speechLang">Language</label>
+              <input id="speechLang" type="text" placeholder="en" />
+            </div>
+            <div class="row">
+              <label for="speechEngine">Engine</label>
+              <select id="speechEngine">
+                <option value="mathcat">mathcat</option>
+                <option value="sre">sre</option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="speechStyle">Style</label>
+              <select id="speechStyle">
+                <option value="ClearSpeak">ClearSpeak</option>
+                <option value="SimpleSpeak">SimpleSpeak</option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="speechVerbosity">Verbosity</label>
+              <select id="speechVerbosity">
+                <option value="Verbose">Verbose</option>
+                <option value="Medium">Medium</option>
+                <option value="Terse">Terse</option>
+              </select>
+            </div>
+          </div>
         </fieldset>
 
       </div>
@@ -229,13 +262,47 @@ textarea {
       const width = el('width');
       const lineWidth = el('lineWidth');
       const scale = el('scale');
-      const display = el('display');
       const isBase64 = el('isBase64');
       const urlOut = el('urlOut');
       const previewCanvas = el('previewCanvas');
       const dpiRow = el('dpiRow');
       const speechCanvas = el('speechCanvas');
       const speechUrlOut = el('speechUrlOut');
+      const speechLang = el('speechLang');
+      const speechEngine = el('speechEngine');
+      const speechStyle = el('speechStyle');
+      const speechVerbosity = el('speechVerbosity');
+      const display = el('display');
+
+      function updateStyleOptions() {
+        const engine = speechEngine.value;
+        speechStyle.innerHTML = '';
+        
+        if (engine === 'mathcat') {
+          speechStyle.innerHTML = '<option value="ClearSpeak">ClearSpeak</option><option value="SimpleSpeak">SimpleSpeak</option>';
+        } else if (engine === 'sre') {
+          speechStyle.innerHTML = '<option value="ClearSpeak">ClearSpeak</option><option value="MathSpeak">MathSpeak</option>';
+        }
+        
+        updateVerbosityOptions();
+      }
+
+      function updateVerbosityOptions() {
+        const engine = speechEngine.value;
+        const style = speechStyle.value;
+        speechVerbosity.innerHTML = '';
+        
+        if (engine === 'mathcat') {
+          // Both ClearSpeak and SimpleSpeak have the same verbosity options for mathcat
+          speechVerbosity.innerHTML = '<option value="Verbose">Verbose</option><option value="Medium">Medium</option><option value="Terse">Terse</option>';
+        } else if (engine === 'sre') {
+          if (style === 'ClearSpeak') {
+            speechVerbosity.innerHTML = '<option value="Auto">Auto</option><option value="Explicit">Explicit</option>';
+          } else if (style === 'MathSpeak') {
+            speechVerbosity.innerHTML = '<option value="Verbose">Verbose</option><option value="Brief">Brief</option><option value="Superbrief">Superbrief</option>';
+          }
+        }
+      }
 
       function urlSafeBase64Encode(str){
         try { const b64 = btoa(str); return b64.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
@@ -254,6 +321,8 @@ textarea {
         if(isBase64.value === 'true'){
           payload = urlSafeBase64Encode(payload);
           qp.set('isBase64','true');
+        } else if(isBase64.value === 'false'){
+          qp.set('isBase64','false');
         }
         qp.set(key, payload);
 
@@ -267,7 +336,8 @@ textarea {
         if(width.value) qp.set('width', width.value.trim());
         if(lineWidth.value) qp.set('lineWidth', lineWidth.value.trim());
         if(scale.value) qp.set('scale', scale.value.trim());
-        if(display.value) qp.set('display', display.value.trim());
+        if(display.value === 'yes') qp.set('display', '1');
+        else if(display.value === 'no') qp.set('display', '0');
 
         return `${base}${path}?${qp.toString()}`;
       }
@@ -313,7 +383,19 @@ async function renderPreview(url) {
 
         try {
           const qp = new URLSearchParams();
-          qp.set(mode, expression);
+          
+          let payload = expression;
+          if(isBase64.value === 'true'){
+            payload = urlSafeBase64Encode(payload);
+            qp.set('isBase64','true');
+          }
+          qp.set(mode, payload);
+          
+          if (speechLang.value) qp.set('lang', speechLang.value.trim());
+          if (speechEngine.value) qp.set('engine', speechEngine.value);
+          if (speechStyle.value) qp.set('style', speechStyle.value);
+          if (speechVerbosity.value) qp.set('verbosity', speechVerbosity.value);
+          
           const speechUrl = `${baseUrl}/speechtext?${qp.toString()}`;
           speechUrlOut.value = speechUrl;
           
@@ -396,26 +478,35 @@ async function renderPreview(url) {
         }catch(err){ console.error(err); e.target.textContent = 'Copy failed'; setTimeout(()=>e.target.textContent='Copy Speech URL', 1600); }
       });
 
+      // Add event listeners for speech settings
+      speechEngine.addEventListener('change', updateStyleOptions);
+      speechStyle.addEventListener('change', updateVerbosityOptions);
+
       format.addEventListener('change', ()=>{ dpiRow.style.display = (format.value === 'svg') ? 'none' : ''; });
 
       document.querySelectorAll('[data-example]').forEach(btn=>{
         btn.addEventListener('click', ()=>{
           const [kind, name] = (btn.getAttribute('data-example')||'').split(':');
-          mode.value = kind; format.value = 'png'; isBase64.value = 'false';
-          fg.value = ''; font.value = ''; dpi.value='300'; em.value=''; ex.value=''; width.value=''; lineWidth.value=''; scale.value=''; display.value='';
+          mode.value = kind; format.value = 'png'; isBase64.value = 'blank';
+          fg.value = ''; font.value = ''; dpi.value=''; em.value=''; ex.value=''; width.value=''; lineWidth.value=''; scale.value=''; display.value = 'blank';
           switch(name){
             case 'Quadratic': expr.value = '\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}'; break;
             case 'SumCubes': expr.value = 'sum_(i=1)^n i^3 = (n(n+1)/2)^2'; break;
-            case 'InlineX': expr.value = '<math><mi>x</mi></math>'; break;
+            case 'SquareRoot': expr.value = '<math><msqrt><mn>4</mn></msqrt><mo>+</mo><mn>5</mn></math>'; break;
             case 'Integral': expr.value = '\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}'; break;
           }
           buildAndPreview();
         });
       });
 
+      // Initialize speech settings
+      updateStyleOptions();
+
       // Initial build
       buildAndPreview();
     })();
   </script>
+</body>
+</html>
 </body>
 </html>

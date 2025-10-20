@@ -386,6 +386,12 @@ const svgFromTeX = async (tex, options = {}, fgColor) => {
   if ("scale" in options) {
     delete options.scale;
   }
+  // MathJax tex2svgPromise returns multiple SVGs for inline math if not in display mode
+  // so we force display mode here and prefix with \textstyle to get inline sizing and layout
+  if(!options.display){
+    tex = `\\textstyle ${tex}`;
+    options.display = true;
+  }
 
   await ensureMathJaxReady(tex);
   const svgNode = await MathJax.tex2svgPromise(tex, options);
@@ -414,6 +420,8 @@ const svgFromAM = async (asciimath, options = {}, fgColor) => {
   if ("scale" in options) {
     delete options.scale;
   }
+    // MathJax asciimath2svgPromise returns multiple SVGs for inline math if not in display mode
+  options.display = true;
   await mathJaxReady;
   const svgNode = await MathJax.asciimath2svgPromise(asciimath, options);
   return applySvgColor(
@@ -441,6 +449,8 @@ const svgFromMathML = async (mathml, options = {}, fgColor) => {
   if ("scale" in options) {
     delete options.scale;
   }
+  // MathJax mathml2svgPromise returns multiple SVGs for inline math if not in display mode
+  options.display = true;
   await mathJaxReady;
   const svgNode = await MathJax.mathml2svgPromise(mathml, options);
   return applySvgColor(

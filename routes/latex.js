@@ -27,7 +27,7 @@ router.get('/', async (req, res, next) => {
       newSvg = await withTimeout(
         (async () => {
           // Generate SVG
-          return await svgFromTeX(mathConversionOptions?.display ? formula : `{${formula}}`, mathConversionOptions, fg);
+          return await svgFromTeX(formula, mathConversionOptions, fg);
         })(),
         3000 // 3 second timeout
       );
