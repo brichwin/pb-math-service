@@ -1,5 +1,12 @@
 // node >=18
 const { toBool, toNum } = require("../utils");
+const { LRUCache } = require('lru-cache');
+
+// Cache for MathJax SVG results to avoid recomputation
+const svgCache = new LRUCache({
+  max: 1000, // Maximum number of cached items
+  ttl: 1000 * 60 * 60 * 24, // 24 hours TTL
+});
 
 let currentPackageSignature = 'mathjax needs loading';
 let mathJaxReady = null;
@@ -373,32 +380,331 @@ const mmlFromMathML = async (mathml) => {
 };
 
 /**
+ * Generate a cache key for SVG results
+ * @param {string} input - The mathematical expression
+ * @param {string} type - Type of input (tex, asciimath, mathml)
+ * @param {Object} options - Conversion options
+ * @returns {string} Cache key
+ */
+function generateSvgCacheKey(input, type, options = {}) {
+  const optionsStr = JSON.stringify(options);
+  return `${type}:${optionsStr}:${input}`;
+}
+
+/**
+ * Extract multiple SVG elements from MathJax result
+ * @param {Object} svgNode - The MathJax SVG result
+ * @returns {Object[]} Array of SVG nodes
+ */
+function extractSvgChunks(svgNode) {
+  const adaptor = MathJax.startup.adaptor;
+  const chunks = [];
+  
+  // Handle both single SVG and multiple SVG cases
+  if (adaptor.kind(svgNode) === 'svg') {
+    chunks.push(svgNode);
+  } else {
+    // Look for multiple SVG elements in the container
+    let child = adaptor.firstChild(svgNode);
+    while (child) {
+      if (adaptor.kind(child) === 'svg') {
+        chunks.push(child);
+      }
+      child = adaptor.next(child);
+    }
+    
+    // If no SVG children found, look deeper
+    if (chunks.length === 0) {
+      const findSvgs = (node) => {
+        let current = adaptor.firstChild(node);
+        while (current) {
+          if (adaptor.kind(current) === 'svg') {
+            chunks.push(current);
+          } else {
+            findSvgs(current);
+          }
+          current = adaptor.next(current);
+        }
+      };
+      findSvgs(svgNode);
+    }
+  }
+  
+  return chunks.length > 0 ? chunks : [svgNode];
+}
+
+/**
+ * Combine multiple MathJax v4 SVG chunks into a single SVG.
+ * - Preserves baselines by aligning on a global viewBox minY/maxY
+ * - Adds a fixed horizontal margin between chunks (given in ex; converted to viewBox units)
+ * - Merges <defs> and de-duplicates by id
+ *
+ * @param {string[]} svgChunks  Array of per-chunk SVG strings (or nodes you stringify earlier)
+ * @param {number}   scale      Optional: scale you already applied inside cleanAndScaleSvg
+ * @param {string}   fgColor    6-hex foreground color (no #)
+ * @param {number}   marginEx   Horizontal gap between chunks, in ex
+ * @returns {string} Standalone combined SVG string with XML declaration
+ */
+function combineSvgChunks(svgChunks, scale = 1, fgColor = '000000', marginEx = 0.4) {
+  console.log(`Combining ${svgChunks.length} SVG chunks with scale ${scale} and fgColor #${fgColor}`);
+
+  // Fast-path single chunk
+  if (svgChunks.length === 1) {
+    return applySvgColor(
+      makeSvgStandAlone(cleanAndScaleSvg(svgChunks[0], scale), fgColor),
+      fgColor
+    );
+  }
+
+  const processed = [];
+  const defsById = new Map(); // id -> element string (first wins)
+  let globalMinY = +Infinity;
+  let globalMaxY = -Infinity;
+
+  // Parse helpers
+  const num = (s, d = 0) => (s == null ? d : parseFloat(String(s)));
+  const getAttr = (svg, name) => {
+    const m = svg.match(new RegExp(`${name}="([^"]+)"`));
+    return m ? m[1] : null;
+  };
+
+  // Preprocess chunks: clean, pull metrics, stash content and defs
+  svgChunks.forEach((chunk, index) => {
+    console.log(`Processing chunk ${index + 1}/${svgChunks.length}`);
+    const s = cleanAndScaleSvg(chunk, scale); // must return a complete <svg ...>...</svg> string
+
+    const widthAttr = getAttr(s, 'width');   // e.g. "4.359ex"
+    const heightAttr = getAttr(s, 'height'); // e.g. "2.452ex"
+    const vbAttr = getAttr(s, 'viewBox');    // e.g. "0 -833.9 1926.8 1083.9"
+
+    // display sizes in ex (strip units if present)
+    const displayWidthEx = num(widthAttr?.replace(/ex$/, ''), 0);
+    const displayHeightEx = num(heightAttr?.replace(/ex$/, ''), 0);
+
+    // viewBox numbers: minX, minY, width, height
+    let vbMinX = 0, vbMinY = 0, vbWidth = displayWidthEx, vbHeight = displayHeightEx;
+    if (vbAttr) {
+      const p = vbAttr.trim().split(/\s+/).map(parseFloat);
+      if (p.length >= 4) {
+        [vbMinX, vbMinY, vbWidth, vbHeight] = p;
+      }
+    }
+
+    // Track global vertical extents
+    globalMinY = Math.min(globalMinY, vbMinY);
+    globalMaxY = Math.max(globalMaxY, vbMinY + vbHeight);
+
+    // Extract <defs> content and inner SVG content
+    const defsMatch = s.match(/<defs[^>]*>([\s\S]*?)<\/defs>/);
+    if (defsMatch && defsMatch[1].trim()) {
+      // Find any elements with id="" and de-dup
+      const rawDefs = defsMatch[1];
+      // naive split: keep whole tagged elements; good enough for MathJax's defs (paths, glyphs, etc.)
+      const els = rawDefs.match(/<[^>]+id="[^"]+"[\s\S]*?<\/[^>]+>|<[^>]+id="[^"]+"[^>]*\/>/g) || [];
+      for (const el of els) {
+        const id = (el.match(/id="([^"]+)"/) || [])[1];
+        if (id && !defsById.has(id)) defsById.set(id, el);
+      }
+      // Also keep any defs children without id (once)
+      const anonEls = rawDefs.match(/<(?:linearGradient|clipPath|style|mask|filter)\b[\s\S]*?<\/\1>|<(?:linearGradient|clipPath|style|mask|filter)\b[^>]*\/>/g) || [];
+      // Use a synthetic key to avoid over-duplication
+      for (const el of anonEls) {
+        const key = 'anon:' + el.replace(/\s+/g, ' ').trim();
+        if (!defsById.has(key)) defsById.set(key, el);
+      }
+    }
+
+    // Remove outer <svg> and any <defs> to get drawable content
+    const inner = s
+      .replace(/^[\s\S]*?<svg[^>]*>/, '')   // drop everything up to opening <svg>
+      .replace(/<\/svg>\s*$/, '')           // drop closing
+      .replace(/<defs[^>]*>[\s\S]*?<\/defs>/g, ''); // drop defs
+
+    // Per-chunk scale (viewBox units per ex unit)
+    const vbPerEx = displayWidthEx > 0 ? vbWidth / displayWidthEx : 1;
+
+    processed.push({
+      content: inner,
+      displayWidthEx,
+      displayHeightEx,
+      vbMinX, vbMinY, vbWidth, vbHeight,
+      vbPerEx
+    });
+  });
+
+  // Combined display size in ex
+  const totalDisplayWidthEx = processed.reduce((acc, c, i) =>
+    acc + c.displayWidthEx + (i ? marginEx : 0), 0);
+  const maxDisplayHeightEx = processed.reduce((m, c) => Math.max(m, c.displayHeightEx), 0);
+
+  // Horizontal placement (in viewBox units)
+  let xVb = 0;
+  const placements = [];
+  let totalVbWidth = 0;
+
+  processed.forEach((c, i) => {
+    const marginVb = i ? (c.vbPerEx * marginEx) : 0; // convert ex margin to this chunk's vb units
+    xVb += i ? marginVb : 0;
+    placements.push({
+      x: xVb,
+      y: (c.vbMinY - globalMinY), // shift vertically so baselines align
+      content: c.content
+    });
+    xVb += c.vbWidth;
+  });
+
+  totalVbWidth = xVb;
+  const globalHeight = (globalMaxY - globalMinY);
+
+  // Build combined SVG
+  const xmlDeclaration = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>';
+  const svgCss = [
+    'svg a{fill:blue;stroke:blue}',
+    '[data-mml-node="merror"]>g{fill:red;stroke:red}',
+    '[data-mml-node="merror"]>rect[data-background]{fill:yellow;stroke:none}',
+    '[data-frame],[data-line]{stroke-width:70px;fill:none}',
+    '.mjx-dashed{stroke-dasharray:140}',
+    '.mjx-dotted{stroke-linecap:round;stroke-dasharray:0,140}',
+    'use[data-c]{stroke-width:3px}',
+  ].join('');
+
+  let out = '';
+  out += `<svg xmlns="http://www.w3.org/2000/svg"`;
+  out += ` xmlns:xlink="http://www.w3.org/1999/xlink"`;
+  out += ` role="img" focusable="false"`;
+  out += ` width="${totalDisplayWidthEx}ex" height="${maxDisplayHeightEx}ex"`;
+  out += ` viewBox="0 ${globalMinY} ${totalVbWidth} ${globalHeight}">`;
+
+  // <defs> (CSS + de-duped entries)
+  out += `<defs><style>${svgCss}</style>`;
+  for (const el of defsById.values()) out += el;
+  out += `</defs>`;
+
+  // Place each chunk with translate(x, y)
+  for (const p of placements) {
+    if (p.x !== 0 || p.y !== 0) {
+      out += `<g transform="translate(${p.x}, ${p.y})">${p.content}</g>`;
+    } else {
+      out += p.content; // first chunk often needs no transform
+    }
+  }
+
+  out += `</svg>`;
+
+  // Apply color and ensure currentColor gets replaced
+  const combined = xmlDeclaration + '\n' +
+    out.replace(/"currentColor"/g, `"#${fgColor}"`);
+  return applySvgColor(combined, fgColor);
+}
+
+
+/**
+ * Get the number of SVG chunks that would be produced for a TeX expression
+ * @param {string} tex - The TeX mathematical expression
+ * @param {Object} [options={}] - Conversion options
+ * @returns {Promise<number>} Promise that resolves to the number of SVG chunks
+ */
+const getSvgCountForTeX = async (tex, options = {}) => {
+  const cacheKey = generateSvgCacheKey(tex, 'tex', options);
+  
+  let cached = svgCache.get(cacheKey);
+  if (!cached) {
+    await ensureMathJaxReady(tex);
+    const svgNode = await MathJax.tex2svgPromise(tex, options);
+    const chunks = extractSvgChunks(svgNode);
+    
+    cached = { chunks, count: chunks.length };
+    svgCache.set(cacheKey, cached);
+  }
+  
+  return cached.count;
+};
+
+/**
+ * Get the number of SVG chunks that would be produced for an AsciiMath expression
+ * @param {string} asciimath - The AsciiMath expression
+ * @param {Object} [options={}] - Conversion options
+ * @returns {Promise<number>} Promise that resolves to the number of SVG chunks
+ */
+const getSvgCountForAM = async (asciimath, options = {}) => {
+  const cacheKey = generateSvgCacheKey(asciimath, 'asciimath', options);
+  
+  let cached = svgCache.get(cacheKey);
+  if (!cached) {
+    await mathJaxReady;
+    const svgNode = await MathJax.asciimath2svgPromise(asciimath, options);
+    const chunks = extractSvgChunks(svgNode);
+    
+    cached = { chunks, count: chunks.length };
+    svgCache.set(cacheKey, cached);
+  }
+  
+  return cached.count;
+};
+
+/**
+ * Get the number of SVG chunks that would be produced for a MathML expression
+ * @param {string} mathml - The MathML markup
+ * @param {Object} [options={}] - Conversion options
+ * @returns {Promise<number>} Promise that resolves to the number of SVG chunks
+ */
+const getSvgCountForMathML = async (mathml, options = {}) => {
+  const cacheKey = generateSvgCacheKey(mathml, 'mathml', options);
+  
+  let cached = svgCache.get(cacheKey);
+  if (!cached) {
+    await mathJaxReady;
+    const svgNode = await MathJax.mathml2svgPromise(mathml, options);
+    const chunks = extractSvgChunks(svgNode);
+    
+    cached = { chunks, count: chunks.length };
+    svgCache.set(cacheKey, cached);
+  }
+  
+  return cached.count;
+};
+
+/**
  * Converts TeX mathematical notation to standalone SVG image.
  * Automatically handles package requirements and MathJax reinitialization.
  * @param {string} tex - The TeX mathematical expression to convert
  * @param {Object} [options={}] - Optional configuration object for MathJax rendering
  * @param {string} fgColor - Hex color value for foreground
+ * @param {number} [chunkIndex=0] - Which SVG chunk to return (1-based, 0 = combined)
  * @returns {Promise<string>} Promise that resolves to standalone SVG markup
  * @throws {Error} If MathJax fails to convert the TeX expression
  */
-const svgFromTeX = async (tex, options = {}, fgColor) => {
+const svgFromTeX = async (tex, options = {}, fgColor, chunkIndex = 0) => {
   const scale = options.scale || 1;
   if ("scale" in options) {
     delete options.scale;
   }
-  // MathJax tex2svgPromise returns multiple SVGs for inline math if not in display mode
-  // so we force display mode here and prefix with \textstyle to get inline sizing and layout
-  if(!options.display){
-    tex = `\\textstyle ${tex}`;
-    options.display = true;
-  }
 
-  await ensureMathJaxReady(tex);
-  const svgNode = await MathJax.tex2svgPromise(tex, options);
-  return applySvgColor(
-    makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale), fgColor),
-    fgColor
-  );
+  const cacheKey = generateSvgCacheKey(tex, 'tex', options);
+  let cached = svgCache.get(cacheKey);
+  
+  if (!cached) {
+    await ensureMathJaxReady(tex);
+    const svgNode = await MathJax.tex2svgPromise(tex, options);
+    const chunks = extractSvgChunks(svgNode);
+    
+    cached = { chunks, count: chunks.length };
+    svgCache.set(cacheKey, cached);
+  }
+  
+  if (chunkIndex === 0) {
+    // Return combined SVG
+    return combineSvgChunks(cached.chunks, scale, fgColor);
+  } else if (chunkIndex > 0 && chunkIndex <= cached.count) {
+    // Return specific chunk (1-based index)
+    const chunk = cached.chunks[chunkIndex - 1];
+    return applySvgColor(
+      makeSvgStandAlone(cleanAndScaleSvg(chunk, scale), fgColor),
+      fgColor
+    );
+  } else {
+    throw new Error(`Invalid chunk index: ${chunkIndex}. Valid range is 1-${cached.count}`);
+  }
 };
 
 /**
@@ -412,22 +718,41 @@ const svgFromTeX = async (tex, options = {}, fgColor) => {
  * @param {number} [options.scale] - Scale factor for SVG dimensions
  * @param {string} [options.family] - Font family to use
  * @param {string} fgColor - Hex color value (3 or 6 digits, without # prefix) for foreground
+ * @param {number} [chunkIndex=0] - Which SVG chunk to return (1-based, 0 = combined)
  * @returns {Promise<string>} Promise that resolves to standalone SVG markup
  * @throws {Error} If MathJax fails to convert the AsciiMath expression
  */
-const svgFromAM = async (asciimath, options = {}, fgColor) => {
+const svgFromAM = async (asciimath, options = {}, fgColor, chunkIndex = 0) => {
   const scale = options.scale || 1;
   if ("scale" in options) {
     delete options.scale;
   }
-  // MathJax asciimath2svgPromise returns multiple SVGs for inline math if not in display mode
-  options.display = true;
-  await mathJaxReady;
-  const svgNode = await MathJax.asciimath2svgPromise(asciimath, options);
-  return applySvgColor(
-    makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale), fgColor),
-    fgColor
-  );
+
+  const cacheKey = generateSvgCacheKey(asciimath, 'asciimath', options);
+  let cached = svgCache.get(cacheKey);
+  
+  if (!cached) {
+    await mathJaxReady;
+    const svgNode = await MathJax.asciimath2svgPromise(asciimath, options);
+    const chunks = extractSvgChunks(svgNode);
+    
+    cached = { chunks, count: chunks.length };
+    svgCache.set(cacheKey, cached);
+  }
+  
+  if (chunkIndex === 0) {
+    // Return combined SVG
+    return combineSvgChunks(cached.chunks, scale, fgColor);
+  } else if (chunkIndex > 0 && chunkIndex <= cached.count) {
+    // Return specific chunk (1-based index)
+    const chunk = cached.chunks[chunkIndex - 1];
+    return applySvgColor(
+      makeSvgStandAlone(cleanAndScaleSvg(chunk, scale), fgColor),
+      fgColor
+    );
+  } else {
+    throw new Error(`Invalid chunk index: ${chunkIndex}. Valid range is 1-${cached.count}`);
+  }
 };
 
 /**
@@ -441,22 +766,41 @@ const svgFromAM = async (asciimath, options = {}, fgColor) => {
  * @param {number} [options.scale] - Scale factor for SVG dimensions
  * @param {string} [options.family] - Font family to use
  * @param {string} fgColor - Hex color value (3 or 6 digits, without # prefix) for foreground
+ * @param {number} [chunkIndex=0] - Which SVG chunk to return (1-based, 0 = combined)
  * @returns {Promise<string>} Promise that resolves to standalone SVG markup
  * @throws {Error} If MathJax fails to convert the MathML
  */
-const svgFromMathML = async (mathml, options = {}, fgColor) => {
+const svgFromMathML = async (mathml, options = {}, fgColor, chunkIndex = 0) => {
   const scale = options.scale || 1;
   if ("scale" in options) {
     delete options.scale;
   }
-  // MathJax mathml2svgPromise returns multiple SVGs for inline math if not in display mode
-  options.display = true;
-  await mathJaxReady;
-  const svgNode = await MathJax.mathml2svgPromise(mathml, options);
-  return applySvgColor(
-    makeSvgStandAlone(cleanAndScaleSvg(svgNode, scale), fgColor),
-    fgColor
-  );
+
+  const cacheKey = generateSvgCacheKey(mathml, 'mathml', options);
+  let cached = svgCache.get(cacheKey);
+  
+  if (!cached) {
+    await mathJaxReady;
+    const svgNode = await MathJax.mathml2svgPromise(mathml, options);
+    const chunks = extractSvgChunks(svgNode);
+    
+    cached = { chunks, count: chunks.length };
+    svgCache.set(cacheKey, cached);
+  }
+  
+  if (chunkIndex === 0) {
+    // Return combined SVG
+    return combineSvgChunks(cached.chunks, scale, fgColor);
+  } else if (chunkIndex > 0 && chunkIndex <= cached.count) {
+    // Return specific chunk (1-based index)
+    const chunk = cached.chunks[chunkIndex - 1];
+    return applySvgColor(
+      makeSvgStandAlone(cleanAndScaleSvg(chunk, scale), fgColor),
+      fgColor
+    );
+  } else {
+    throw new Error(`Invalid chunk index: ${chunkIndex}. Valid range is 1-${cached.count}`);
+  }
 };
 
 /**
@@ -562,6 +906,7 @@ const getMathJaxInfo = () => {
 
 configureMathJax(); // initial load
 
+
 module.exports = {
   mathJaxReady,
   ensureMathJaxReady,
@@ -572,5 +917,8 @@ module.exports = {
   svgFromTeX,
   svgFromAM,
   svgFromMathML,
+  getSvgCountForTeX,
+  getSvgCountForAM,
+  getSvgCountForMathML,
   getMathJaxInfo,
 };
