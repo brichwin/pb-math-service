@@ -110,6 +110,15 @@ textarea {
           </select>
         </div>
 
+        <div class="row">
+          <label for="display">Display</label>
+          <select id="display">
+            <option value="blank">Blank (default)</option>
+            <option value="yes">Yes (add <code class="inline">display=1</code>)</option>
+            <option value="no">No (add <code class="inline">display=0</code>)</option>
+          </select>
+        </div>
+
         <div>
           <label for="expr" class="hint">Expression</label>
           <textarea id="expr" spellcheck="false">x^2 + y^2 = z^2</textarea>
@@ -156,14 +165,6 @@ textarea {
               <div class="row"><label for="width">width (px)</label><input id="width" type="number" step="1" ></div>
               <div class="row"><label for="lineWidth">lineWidth (px)</label><input id="lineWidth" type="number" step="1" ></div>
               <div class="row"><label for="scale">scale</label><input id="scale" type="number" step="0.1" ></div>
-              <div class="row">
-                <label for="display">Display</label>
-                <select id="display">
-                  <option value="blank">Blank (default)</option>
-                  <option value="yes">Yes (add <code class="inline">display=1</code>)</option>
-                  <option value="no">No (add <code class="inline">display=0</code>)</option>
-                </select>
-              </div>
             </div>
           </div>
         </details>
