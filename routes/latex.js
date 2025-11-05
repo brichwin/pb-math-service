@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const cacheMiddleware = require('../middleware/cache');
-const { buildMathConversionOptions, svgFromTeX } = require('../services/mathJaxConverters');
+const { buildMathConversionOptions, svgFromTeX, getSvgCountForTeX } = require('../services/mathJaxConverters');
 const { buildPngFromSvgConversionOptions, pngFromSvg } = require('../services/imageConverter');
 const { toBool, requiredParamsAreMissing, processFormula, truncateMiddle } = require('../utils');
 const { withTimeout, mathJaxLock, imageConverterLock} = require('../utils/locks');
@@ -11,7 +11,7 @@ router.use(cacheMiddleware);
 
 router.get('/', async (req, res, next) => {
   try {
-    const { latex, svg, fg } = req.query;
+    const { latex, svg, fg, getChunkCount } = req.query;
     
     if(requiredParamsAreMissing(req, res, ['latex'])) return;
     const formula = processFormula(req, res, latex);
@@ -19,7 +19,13 @@ router.get('/', async (req, res, next) => {
 
     console.log('Processed formula:', truncateMiddle(formula, 80));
     const mathConversionOptions = buildMathConversionOptions(req.query);
-    const pngConversionOptions = buildPngFromSvgConversionOptions(req.query);
+
+    // If requesting chunk count only
+    if (toBool(getChunkCount)) {
+      const mathConversionOptions = buildMathConversionOptions(req.query);
+      const count = await getSvgCountForTeX(formula, mathConversionOptions);
+      return res.json({ chunkCount: count });
+    }
 
     let newSvg;
     await mathJaxLock.acquire();
@@ -50,6 +56,7 @@ router.get('/', async (req, res, next) => {
     }
     
     let png;
+    const pngConversionOptions = buildPngFromSvgConversionOptions(req.query);
     await imageConverterLock.acquire();
     try {
       png = await withTimeout(

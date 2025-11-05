@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const cacheMiddleware = require('../middleware/cache');
-const { buildMathConversionOptions, svgFromAM } = require('../services/mathJaxConverters');
+const { buildMathConversionOptions, svgFromAM, getSvgCountForAM } = require('../services/mathJaxConverters');
 const { buildPngFromSvgConversionOptions, pngFromSvg } = require('../services/imageConverter');
 const { toBool, requiredParamsAreMissing, processFormula } = require('../utils');
 const { sendError } = require('../utils/sendErrorHandler');
@@ -10,15 +10,21 @@ router.use(cacheMiddleware);
 
 router.get('/', async (req, res, next) => {
   try {
-    const { asciimath, svg, fg } = req.query;
-    
+    const { asciimath, svg, fg, getChunkCount } = req.query;
+
     if(requiredParamsAreMissing(req, res, ['asciimath'])) return;
 
     const formula = processFormula(req, res, asciimath);
     if (!formula) return; // processFormula already handled the response in case of error
 
     const mathConversionOptions = buildMathConversionOptions(req.query);
-    const pngConversionOptions = buildPngFromSvgConversionOptions(req.query);
+
+        // If requesting chunk count only
+    if (toBool(getChunkCount)) {
+      const mathConversionOptions = buildMathConversionOptions(req.query);
+      const count = await getSvgCountForAM(formula, mathConversionOptions);
+      return res.json({ chunkCount: count });
+    }
 
     // Generate SVG
     let newSvg = await svgFromAM(formula, mathConversionOptions, fg);
@@ -31,6 +37,7 @@ router.get('/', async (req, res, next) => {
     }
     
     // Convert to PNG
+    const pngConversionOptions = buildPngFromSvgConversionOptions(req.query);
     const png = pngFromSvg(newSvg, pngConversionOptions);
     
     res.set('Content-Type', 'image/png');
