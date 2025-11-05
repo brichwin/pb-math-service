@@ -11,7 +11,7 @@ router.use(cacheMiddleware);
 
 router.get('/', async (req, res, next) => {
   try {
-    const { mathml, svg, fg, getChunkCount } = req.query;
+    const { mathml, svg, fg, getChunkCount, chunkIndex } = req.query;
     
     if(requiredParamsAreMissing(req, res, ['mathml'])) return;
 
@@ -27,6 +27,12 @@ router.get('/', async (req, res, next) => {
       return res.json({ chunkCount: count });
     }
 
+    // Validate and parse chunkIndex
+    const parsedChunkIndex = chunkIndex !== undefined ? parseInt(chunkIndex, 10) : 0;
+    if (isNaN(parsedChunkIndex) || parsedChunkIndex < 0) {
+      return sendError(req, res, 400, 'Invalid chunkIndex parameter', 'chunkIndex must be a non-negative integer');
+    }
+
     // Generate SVG
     let newSvg;
     await mathJaxLock.acquire();
@@ -34,7 +40,7 @@ router.get('/', async (req, res, next) => {
       newSvg = await withTimeout(
         (async () => {
           // Generate SVG
-          return await svgFromMathML(formula, mathConversionOptions, fg);
+          return await svgFromMathML(formula, mathConversionOptions, fg, parsedChunkIndex);
         })(),
         3000 // 3 second timeout
       );

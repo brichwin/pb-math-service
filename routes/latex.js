@@ -11,7 +11,7 @@ router.use(cacheMiddleware);
 
 router.get('/', async (req, res, next) => {
   try {
-    const { latex, svg, fg, getChunkCount } = req.query;
+    const { latex, svg, fg, getChunkCount, chunkIndex } = req.query;
     
     if(requiredParamsAreMissing(req, res, ['latex'])) return;
     const formula = processFormula(req, res, latex);
@@ -27,13 +27,19 @@ router.get('/', async (req, res, next) => {
       return res.json({ chunkCount: count });
     }
 
+    // Validate and parse chunkIndex
+    const parsedChunkIndex = chunkIndex !== undefined ? parseInt(chunkIndex, 10) : 0;
+    if (isNaN(parsedChunkIndex) || parsedChunkIndex < 0) {
+      return sendError(req, res, 400, 'Invalid chunkIndex parameter', 'chunkIndex must be a non-negative integer');
+    }
+
     let newSvg;
     await mathJaxLock.acquire();
     try {
       newSvg = await withTimeout(
         (async () => {
           // Generate SVG
-          return await svgFromTeX(formula, mathConversionOptions, fg);
+          return await svgFromTeX(formula, mathConversionOptions, fg, parsedChunkIndex);
         })(),
         3000 // 3 second timeout
       );

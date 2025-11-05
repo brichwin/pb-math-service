@@ -472,7 +472,7 @@ function extractSvgChunks(svgNode) {
  * @param {number}   marginEx   Horizontal gap between chunks (in ex units)
  * @returns {string}  Standalone combined SVG (XML-declared)
  */
-function combineSvgChunks(svgChunks, scale = 1, fgColor = '000000', marginEx = .7) {
+function combineSvgChunks(svgChunks, scale = 1, fgColor = '000000', marginEx = 0.7) {
   console.log(`Combining ${svgChunks.length} SVG chunks with scale ${scale} and fgColor #${fgColor}`);
 
   // Fast path: single chunk

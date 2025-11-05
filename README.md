@@ -50,6 +50,19 @@ GET /latex?latex=x^2+y^2&fg=FF0000
 
 # Base64 encoded formula
 GET /latex?latex=eDIreQ==&isBase64=true
+
+# Get chunk count
+GET /latex?latex=x^2&getChunkCount=true
+
+# Get combined SVG (default)
+GET /latex?latex=x^2&svg=1
+
+# Get specific chunk (1-based indexing for individual chunks)
+GET /latex?latex=x^2&svg=1&chunkIndex=1
+GET /latex?latex=x^2&svg=1&chunkIndex=2
+
+# Combined chunks (chunkIndex=0, which is the default)
+GET /latex?latex=x^2&svg=1&chunkIndex=0
 ```
 
 **Image Gen Query Parameters:**

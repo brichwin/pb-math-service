@@ -10,7 +10,7 @@ router.use(cacheMiddleware);
 
 router.get('/', async (req, res, next) => {
   try {
-    const { asciimath, svg, fg, getChunkCount } = req.query;
+    const { asciimath, svg, fg, getChunkCount, chunkIndex } = req.query;
 
     if(requiredParamsAreMissing(req, res, ['asciimath'])) return;
 
@@ -19,15 +19,21 @@ router.get('/', async (req, res, next) => {
 
     const mathConversionOptions = buildMathConversionOptions(req.query);
 
-        // If requesting chunk count only
+    // If requesting chunk count only
     if (toBool(getChunkCount)) {
       const mathConversionOptions = buildMathConversionOptions(req.query);
       const count = await getSvgCountForAM(formula, mathConversionOptions);
       return res.json({ chunkCount: count });
     }
+  
+    // Validate and parse chunkIndex
+    const parsedChunkIndex = chunkIndex !== undefined ? parseInt(chunkIndex, 10) : 0;
+    if (isNaN(parsedChunkIndex) || parsedChunkIndex < 0) {
+      return sendError(req, res, 400, 'Invalid chunkIndex parameter', 'chunkIndex must be a non-negative integer');
+    }
 
     // Generate SVG
-    let newSvg = await svgFromAM(formula, mathConversionOptions, fg);
+    let newSvg = await svgFromAM(formula, mathConversionOptions, fg, parsedChunkIndex);
     
     // If SVG output is requested, return it directly    
     if (toBool(svg)) {

@@ -75,6 +75,25 @@ textarea {
       border: 1px solid var(--border);
       border-radius: 6px;
     }
+    .svg-chunks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      align-items: baseline;
+      margin: 0.5rem 0;
+    }
+    .svg-chunk {
+      border: none;
+      border-radius: 0;
+      padding: 0;
+      background: transparent;
+    }
+    .chunk-info {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -351,40 +370,119 @@ textarea {
         return `${base}${path}?${qp.toString()}`;
       }
 
-async function renderPreview(url) {
-  previewCanvas.innerHTML = '';
-  const start = performance.now();
+      async function renderPreview(url) {
+        previewCanvas.innerHTML = '';
+        const start = performance.now();
 
-  try {
-    // Fetch as a blob to measure timing
-    const res = await fetch(url);
-    const end = performance.now();
-    const ms = (end - start).toFixed(1);
+        try {
+          if (format.value === 'svg') {
+            // For SVG format, first get chunk count, then fetch individual chunks
+            await renderSvgChunks(url, start);
+          } else {
+            // For PNG format, use the original logic
+            await renderSingleImage(url, start);
+          }
+        } catch (err) {
+          previewCanvas.innerHTML = `<div class="hint">Preview failed: ${err.message}</div>`;
+        }
+      }
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      async function renderSingleImage(url, start) {
+        // Fetch as a blob to measure timing
+        const res = await fetch(url);
+        const end = performance.now();
+        const ms = (end - start).toFixed(1);
 
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    // Build the preview image
-    const img = new Image();
-    img.alt = 'Rendered math preview';
-    img.src = objectUrl;
-    img.style.maxWidth = '100%';
-    img.style.height = 'auto';
-    previewCanvas.appendChild(img);
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
 
-    // Add timing info below
-    const timingInfo = document.createElement('div');
-    timingInfo.className = 'hint';
-    timingInfo.style.marginTop = '0.5rem';
-    timingInfo.textContent = `Response time: ${ms} ms`;
-    previewCanvas.appendChild(timingInfo);
+        // Build the preview image
+        const img = new Image();
+        img.alt = 'Rendered math preview';
+        img.src = objectUrl;
+        img.style.maxWidth = '100%';
+        img.style.height = 'auto';
+        previewCanvas.appendChild(img);
 
-  } catch (err) {
-    previewCanvas.innerHTML = `<div class="hint">Preview failed: ${err.message}</div>`;
-  }
-}
+        // Add timing info below
+        const timingInfo = document.createElement('div');
+        timingInfo.className = 'hint';
+        timingInfo.style.marginTop = '0.5rem';
+        timingInfo.textContent = `Response time: ${ms} ms`;
+        previewCanvas.appendChild(timingInfo);
+      }
+
+      async function renderSvgChunks(baseUrl, start) {
+        // First, get the chunk count
+        const chunkCountUrl = baseUrl + '&getChunkCount=true';
+        const chunkCountRes = await fetch(chunkCountUrl);
+        
+        if (!chunkCountRes.ok) throw new Error(`HTTP ${chunkCountRes.status} getting chunk count`);
+        
+        const chunkData = await chunkCountRes.json();
+        const chunkCount = chunkData.chunkCount || 1;
+        
+        const end = performance.now();
+        const ms = (end - start).toFixed(1);
+
+        // Create container for chunks
+        const chunksContainer = document.createElement('div');
+        chunksContainer.className = 'svg-chunks';
+        
+        // Add info about chunks
+        const chunkInfo = document.createElement('div');
+        chunkInfo.className = 'hint';
+        chunkInfo.textContent = `Found ${chunkCount} SVG chunk${chunkCount !== 1 ? 's' : ''} - Response time: ${ms} ms`;
+        previewCanvas.appendChild(chunkInfo);
+        
+        if (chunkCount === 1) {
+          // Single chunk - fetch the combined SVG (chunkIndex=0)
+          const svgRes = await fetch(baseUrl + '&chunkIndex=0');
+          if (!svgRes.ok) throw new Error(`HTTP ${svgRes.status} fetching combined SVG`);
+          
+          const svgText = await svgRes.text();
+          const svgContainer = document.createElement('div');
+          svgContainer.innerHTML = svgText;
+          const svgElement = svgContainer.querySelector('svg');
+          
+          if (svgElement) {
+            svgElement.className = 'svg-chunk';
+            svgElement.style.maxWidth = '100%';
+            svgElement.style.height = 'auto';
+            chunksContainer.appendChild(svgElement);
+          }
+        } else {
+          // Multiple chunks - fetch each individual chunk
+          for (let i = 1; i <= chunkCount; i++) {
+            try {
+              const chunkUrl = baseUrl + `&chunkIndex=${i}`;
+              const chunkRes = await fetch(chunkUrl);
+              
+              if (!chunkRes.ok) {
+                console.warn(`Failed to fetch chunk ${i}: HTTP ${chunkRes.status}`);
+                continue;
+              }
+              
+              const svgText = await chunkRes.text();
+              const svgContainer = document.createElement('div');
+              svgContainer.innerHTML = svgText;
+              const svgElement = svgContainer.querySelector('svg');
+              
+              if (svgElement) {
+                svgElement.className = 'svg-chunk';
+                svgElement.style.height = 'auto';
+                chunksContainer.appendChild(svgElement);
+              }
+            } catch (err) {
+              console.warn(`Error fetching chunk ${i}:`, err);
+            }
+          }
+        }
+        
+        previewCanvas.appendChild(chunksContainer);
+      }
 
       async function renderSpeech(baseUrl, mode, expression) {
         speechCanvas.innerHTML = '<div class="hint">Generating speech...</div>';
