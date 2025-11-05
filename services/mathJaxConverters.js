@@ -8,6 +8,22 @@ const svgCache = new LRUCache({
   ttl: 1000 * 60 * 60 * 24, // 24 hours TTL
 });
 
+const getFromSVGCache = (cacheKey) => {
+  const cached = svgCache.get(cacheKey);
+  if(!cached) {
+    console.log(`SVG cache miss for key: ${cacheKey}`);
+    return null;
+  }
+  console.log(`SVG cache hit for key: ${cacheKey}`);
+  return cached;
+};
+
+const svgCacheSet = (cacheKey, cached) => {
+      svgCache.set(cacheKey, cached);
+      console.log(`SVG cache set for key: ${cacheKey}`);
+}
+
+
 let currentPackageSignature = 'mathjax needs loading';
 let mathJaxReady = null;
 
@@ -187,6 +203,7 @@ const scrub = (s) =>
  * Extracts clean SVG markup from a MathJax SVG node and optionally scales it.
  * If the node is wrapped in an mjx-container, extracts the inner SVG element.
  * Applies scaling to width and height attributes when scale factor is provided.
+ * IMPORTANT: This function creates a copy of the node to avoid mutating cached nodes.
  * @param {Object} svgNode - The MathJax SVG node or container
  * @param {number} [scale=1] - Scale factor to apply to SVG dimensions
  * @returns {string} Clean SVG markup with semantic attributes removed and scaling applied
@@ -194,26 +211,29 @@ const scrub = (s) =>
 const cleanAndScaleSvg = (svgNode, scale = 1) => {
   const adaptor = MathJax.startup.adaptor;
 
+  // Create a deep copy of the node to avoid mutating the cached original
+  let workingNode = adaptor.clone(svgNode);
+
   // Ensure we have the <svg>
-  if (adaptor.kind(svgNode) !== "svg") {
-    let child = adaptor.firstChild(svgNode);
+  if (adaptor.kind(workingNode) !== "svg") {
+    let child = adaptor.firstChild(workingNode);
     while (child && adaptor.kind(child) !== "svg") {
       child = adaptor.next(child);
     }
-    if (child) svgNode = child;
+    if (child) workingNode = child;
   }
 
   if (scale !== 1) {
-    const width = parseFloat(adaptor.getAttribute(svgNode, "width")) || 0;
-    const height = parseFloat(adaptor.getAttribute(svgNode, "height")) || 0;
+    const width = parseFloat(adaptor.getAttribute(workingNode, "width")) || 0;
+    const height = parseFloat(adaptor.getAttribute(workingNode, "height")) || 0;
     if (width && height) {
-      adaptor.setAttribute(svgNode, "width", `${width * scale}ex`);
-      adaptor.setAttribute(svgNode, "height", `${height * scale}ex`);
+      adaptor.setAttribute(workingNode, "width", `${width * scale}ex`);
+      adaptor.setAttribute(workingNode, "height", `${height * scale}ex`);
     }
     // Do NOT add any transform to the inner <g>.
   }
 
-  return scrub(adaptor.outerHTML(svgNode));
+  return scrub(adaptor.outerHTML(workingNode));
 };
 
 /**
@@ -387,7 +407,11 @@ const mmlFromMathML = async (mathml) => {
  * @returns {string} Cache key
  */
 function generateSvgCacheKey(input, type, options = {}) {
-  const optionsStr = JSON.stringify(options);
+  const cacheOptions = { ...options };
+  if ("scale" in cacheOptions) {
+    delete cacheOptions.scale;
+  }
+  const optionsStr = JSON.stringify(cacheOptions);
   return `${type}:${optionsStr}:${input}`;
 }
 
@@ -435,20 +459,23 @@ function extractSvgChunks(svgNode) {
 
 /**
  * Combine multiple MathJax v4 SVG chunks into a single SVG.
- * - Preserves baselines by aligning on a global viewBox minY/maxY
- * - Adds a fixed horizontal margin between chunks (given in ex; converted to viewBox units)
- * - Merges <defs> and de-duplicates by id
+ * - Preserves glyph scale exactly (matches MathJax chunk 0)
+ * - Aligns on the TRUE baseline (y=0 in each chunk) + per-chunk vertical-align delta
+ * - Handles per-chunk minX (overhangs) so nothing clips on the left
+ * - Adds uniform horizontal margin (in ex, converted once from chunk 0)
+ * - Merges <defs> and deduplicates by id
+ * - Adds a small bleed around the combined viewBox to avoid edge clipping
  *
- * @param {string[]} svgChunks  Array of per-chunk SVG strings (or nodes you stringify earlier)
- * @param {number}   scale      Optional: scale you already applied inside cleanAndScaleSvg
+ * @param {string[]} svgChunks  Array of per-chunk SVG strings
+ * @param {number}   scale      Clean/scale factor passed to cleanAndScaleSvg
  * @param {string}   fgColor    6-hex foreground color (no #)
- * @param {number}   marginEx   Horizontal gap between chunks, in ex
- * @returns {string} Standalone combined SVG string with XML declaration
+ * @param {number}   marginEx   Horizontal gap between chunks (in ex units)
+ * @returns {string}  Standalone combined SVG (XML-declared)
  */
-function combineSvgChunks(svgChunks, scale = 1, fgColor = '000000', marginEx = 0.4) {
+function combineSvgChunks(svgChunks, scale = 1, fgColor = '000000', marginEx = .7) {
   console.log(`Combining ${svgChunks.length} SVG chunks with scale ${scale} and fgColor #${fgColor}`);
 
-  // Fast-path single chunk
+  // Fast path: single chunk
   if (svgChunks.length === 1) {
     return applySvgColor(
       makeSvgStandAlone(cleanAndScaleSvg(svgChunks[0], scale), fgColor),
@@ -457,106 +484,137 @@ function combineSvgChunks(svgChunks, scale = 1, fgColor = '000000', marginEx = 0
   }
 
   const processed = [];
-  const defsById = new Map(); // id -> element string (first wins)
-  let globalMinY = +Infinity;
-  let globalMaxY = -Infinity;
+  const defsById = new Map(); // id -> element (first wins)
 
-  // Parse helpers
+  // helpers
   const num = (s, d = 0) => (s == null ? d : parseFloat(String(s)));
   const getAttr = (svg, name) => {
     const m = svg.match(new RegExp(`${name}="([^"]+)"`));
     return m ? m[1] : null;
   };
+  const getStyleVal = (svg, prop) => {
+    const m = svg.match(/style="([^"]*)"/);
+    if (!m) return null;
+    const map = Object.fromEntries(
+      m[1].split(';').map(s => s.trim()).filter(Boolean).map(s => s.split(':').map(x => x.trim()))
+    );
+    return map[prop] ?? null;
+  };
 
-  // Preprocess chunks: clean, pull metrics, stash content and defs
+  // ── Pass 1: normalize, collect metrics/content/defs ──────────────────────────
   svgChunks.forEach((chunk, index) => {
     console.log(`Processing chunk ${index + 1}/${svgChunks.length}`);
-    const s = cleanAndScaleSvg(chunk, scale); // must return a complete <svg ...>...</svg> string
 
-    const widthAttr = getAttr(s, 'width');   // e.g. "4.359ex"
-    const heightAttr = getAttr(s, 'height'); // e.g. "2.452ex"
-    const vbAttr = getAttr(s, 'viewBox');    // e.g. "0 -833.9 1926.8 1083.9"
+    // must return a full <svg ...>...</svg> string
+    const s = cleanAndScaleSvg(chunk, scale);
 
-    // display sizes in ex (strip units if present)
-    const displayWidthEx = num(widthAttr?.replace(/ex$/, ''), 0);
+    const widthAttr  = getAttr(s, 'width');     // e.g., "4.359ex"
+    const heightAttr = getAttr(s, 'height');    // e.g., "2.452ex"
+    const vbAttr     = getAttr(s, 'viewBox');   // e.g., "0 -833.9 1926.8 1083.9"
+
+    const displayWidthEx  = num(widthAttr?.replace(/ex$/, ''), 0);
     const displayHeightEx = num(heightAttr?.replace(/ex$/, ''), 0);
 
-    // viewBox numbers: minX, minY, width, height
     let vbMinX = 0, vbMinY = 0, vbWidth = displayWidthEx, vbHeight = displayHeightEx;
     if (vbAttr) {
       const p = vbAttr.trim().split(/\s+/).map(parseFloat);
-      if (p.length >= 4) {
-        [vbMinX, vbMinY, vbWidth, vbHeight] = p;
+      if (p.length >= 4) [vbMinX, vbMinY, vbWidth, vbHeight] = p;
+    }
+
+    // vertical-align (inline layout nudges) → convert to viewBox units
+    const va = getStyleVal(s, 'vertical-align'); // like "-0.566ex"
+    let vaVb = 0;
+    if (va) {
+      const m = va.match(/^(-?\d*\.?\d+)\s*(ex|px)?$/i);
+      if (m) {
+        const val = parseFloat(m[1]);
+        const unit = (m[2] || 'ex').toLowerCase();
+        // If MathJax ever outputs px: default pxPerEx=8 (MathJax default)
+        const pxPerEx = 8;
+        const exVal = unit === 'px' ? (val / pxPerEx) : val;
+        // vb units per ex for this chunk:
+        const vbPerExLocal = displayWidthEx > 0 ? vbWidth / displayWidthEx : 1;
+        vaVb = exVal * vbPerExLocal;
       }
     }
 
-    // Track global vertical extents
-    globalMinY = Math.min(globalMinY, vbMinY);
-    globalMaxY = Math.max(globalMaxY, vbMinY + vbHeight);
-
-    // Extract <defs> content and inner SVG content
+    // Collect defs and de-duplicate by id
     const defsMatch = s.match(/<defs[^>]*>([\s\S]*?)<\/defs>/);
     if (defsMatch && defsMatch[1].trim()) {
-      // Find any elements with id="" and de-dup
       const rawDefs = defsMatch[1];
-      // naive split: keep whole tagged elements; good enough for MathJax's defs (paths, glyphs, etc.)
-      const els = rawDefs.match(/<[^>]+id="[^"]+"[\s\S]*?<\/[^>]+>|<[^>]+id="[^"]+"[^>]*\/>/g) || [];
-      for (const el of els) {
+      const withIds = rawDefs.match(/<[^>]+id="[^"]+"[\s\S]*?<\/[^>]+>|<[^>]+id="[^"]+"[^>]*\/>/g) || [];
+      for (const el of withIds) {
         const id = (el.match(/id="([^"]+)"/) || [])[1];
         if (id && !defsById.has(id)) defsById.set(id, el);
       }
-      // Also keep any defs children without id (once)
-      const anonEls = rawDefs.match(/<(?:linearGradient|clipPath|style|mask|filter)\b[\s\S]*?<\/\1>|<(?:linearGradient|clipPath|style|mask|filter)\b[^>]*\/>/g) || [];
-      // Use a synthetic key to avoid over-duplication
-      for (const el of anonEls) {
+      const anon = rawDefs.match(/<(linearGradient|clipPath|style|mask|filter)\b[\s\S]*?<\/\1>|<(linearGradient|clipPath|style|mask|filter)\b[^>]*\/>/g) || [];
+      for (const el of anon) {
         const key = 'anon:' + el.replace(/\s+/g, ' ').trim();
         if (!defsById.has(key)) defsById.set(key, el);
       }
     }
 
-    // Remove outer <svg> and any <defs> to get drawable content
+    // Strip outer <svg> and any <defs> -> drawable content
     const inner = s
-      .replace(/^[\s\S]*?<svg[^>]*>/, '')   // drop everything up to opening <svg>
-      .replace(/<\/svg>\s*$/, '')           // drop closing
-      .replace(/<defs[^>]*>[\s\S]*?<\/defs>/g, ''); // drop defs
+      .replace(/^[\s\S]*?<svg[^>]*>/, '')
+      .replace(/<\/svg>\s*$/, '')
+      .replace(/<defs[^>]*>[\s\S]*?<\/defs>/g, '');
 
-    // Per-chunk scale (viewBox units per ex unit)
     const vbPerEx = displayWidthEx > 0 ? vbWidth / displayWidthEx : 1;
 
     processed.push({
       content: inner,
-      displayWidthEx,
-      displayHeightEx,
+      displayWidthEx, displayHeightEx,
       vbMinX, vbMinY, vbWidth, vbHeight,
-      vbPerEx
+      vbPerEx,
+      vaVb
     });
   });
 
-  // Combined display size in ex
-  const totalDisplayWidthEx = processed.reduce((acc, c, i) =>
-    acc + c.displayWidthEx + (i ? marginEx : 0), 0);
-  const maxDisplayHeightEx = processed.reduce((m, c) => Math.max(m, c.displayHeightEx), 0);
+  // Use chunk 0 to convert ex→viewBox uniformly (keeps margins visually equal)
+  const vbPerEx0 = processed.length ? (processed[0].vbPerEx || 1) : 1;
+  const exPerVb0 = 1 / vbPerEx0;
+  const marginVb = vbPerEx0 * marginEx;
 
-  // Horizontal placement (in viewBox units)
-  let xVb = 0;
+  // ── Pass 2: horizontal placement; baseline alignment ─────────────────────────
+  let xCursor = 0;
   const placements = [];
-  let totalVbWidth = 0;
+  const vaVb0 = processed.length ? processed[0].vaVb || 0 : 0;
 
   processed.forEach((c, i) => {
-    const marginVb = i ? (c.vbPerEx * marginEx) : 0; // convert ex margin to this chunk's vb units
-    xVb += i ? marginVb : 0;
+    if (i) xCursor += marginVb; // uniform gap before chunk i
     placements.push({
-      x: xVb,
-      y: (c.vbMinY - globalMinY), // shift vertically so baselines align
+      x: xCursor - c.vbMinX,        // account for left overhangs
+      y: c.vaVb - vaVb0,            // BASELINE alignment: relative vertical-align only
       content: c.content
     });
-    xVb += c.vbWidth;
+    xCursor += c.vbWidth;           // advance by chunk's own width
   });
 
-  totalVbWidth = xVb;
-  const globalHeight = (globalMaxY - globalMinY);
+  const totalVbWidth = xCursor;
 
-  // Build combined SVG
+  // ── Pass 3: compute combined vertical extents AFTER placement ───────────────
+  let combinedMinY = +Infinity;
+  let combinedMaxY = -Infinity;
+  processed.forEach((c, i) => {
+    const py = placements[i].y;
+    const top    = py + c.vbMinY;
+    const bottom = py + c.vbMinY + c.vbHeight;
+    if (top    < combinedMinY) combinedMinY = top;
+    if (bottom > combinedMaxY) combinedMaxY = bottom;
+  });
+  const globalHeight = combinedMaxY - combinedMinY;
+
+  // Bleed to avoid stroke/overhang clipping
+  const bleedEx  = 0.15;
+  const bleedVbX = vbPerEx0 * bleedEx;
+  const bleedVbY = vbPerEx0 * bleedEx;
+
+  // Lock glyph scale: width/height derived from combined viewBox using chunk 0 scale
+  const widthEx  = (totalVbWidth + 2 * bleedVbX) * exPerVb0;
+  const heightEx = (globalHeight + 2 * bleedVbY) * exPerVb0;
+
+  // ── Build final SVG ─────────────────────────────────────────────────────────
   const xmlDeclaration = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>';
   const svgCss = [
     'svg a{fill:blue;stroke:blue}',
@@ -569,33 +627,25 @@ function combineSvgChunks(svgChunks, scale = 1, fgColor = '000000', marginEx = 0
   ].join('');
 
   let out = '';
-  out += `<svg xmlns="http://www.w3.org/2000/svg"`;
-  out += ` xmlns:xlink="http://www.w3.org/1999/xlink"`;
-  out += ` role="img" focusable="false"`;
-  out += ` width="${totalDisplayWidthEx}ex" height="${maxDisplayHeightEx}ex"`;
-  out += ` viewBox="0 ${globalMinY} ${totalVbWidth} ${globalHeight}">`;
+  out += `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" role="img" focusable="false"`;
+  out += ` width="${widthEx}ex" height="${heightEx}ex"`;
+  out += ` viewBox="${-bleedVbX} ${combinedMinY - bleedVbY} ${totalVbWidth + 2*bleedVbX} ${globalHeight + 2*bleedVbY}">`;
 
-  // <defs> (CSS + de-duped entries)
   out += `<defs><style>${svgCss}</style>`;
   for (const el of defsById.values()) out += el;
   out += `</defs>`;
 
-  // Place each chunk with translate(x, y)
   for (const p of placements) {
-    if (p.x !== 0 || p.y !== 0) {
-      out += `<g transform="translate(${p.x}, ${p.y})">${p.content}</g>`;
-    } else {
-      out += p.content; // first chunk often needs no transform
-    }
+    out += (p.x || p.y)
+      ? `<g transform="translate(${p.x}, ${p.y})">${p.content}</g>`
+      : p.content;
   }
-
   out += `</svg>`;
 
-  // Apply color and ensure currentColor gets replaced
-  const combined = xmlDeclaration + '\n' +
-    out.replace(/"currentColor"/g, `"#${fgColor}"`);
+  const combined = xmlDeclaration + '\n' + out.replace(/"currentColor"/g, `"#${fgColor}"`);
   return applySvgColor(combined, fgColor);
 }
+
 
 
 /**
@@ -605,16 +655,22 @@ function combineSvgChunks(svgChunks, scale = 1, fgColor = '000000', marginEx = 0
  * @returns {Promise<number>} Promise that resolves to the number of SVG chunks
  */
 const getSvgCountForTeX = async (tex, options = {}) => {
-  const cacheKey = generateSvgCacheKey(tex, 'tex', options);
+  // Remove scale from options for cache key since it's applied during rendering
+  const cacheOptions = { ...options };
+  if ("scale" in cacheOptions) {
+    delete cacheOptions.scale;
+  }
   
-  let cached = svgCache.get(cacheKey);
+  const cacheKey = generateSvgCacheKey(tex, 'tex', cacheOptions);
+  
+  let cached = getFromSVGCache(cacheKey);
   if (!cached) {
     await ensureMathJaxReady(tex);
-    const svgNode = await MathJax.tex2svgPromise(tex, options);
+    const svgNode = await MathJax.tex2svgPromise(tex, cacheOptions);
     const chunks = extractSvgChunks(svgNode);
     
     cached = { chunks, count: chunks.length };
-    svgCache.set(cacheKey, cached);
+    svgCacheSet(cacheKey, cached);
   }
   
   return cached.count;
@@ -627,16 +683,22 @@ const getSvgCountForTeX = async (tex, options = {}) => {
  * @returns {Promise<number>} Promise that resolves to the number of SVG chunks
  */
 const getSvgCountForAM = async (asciimath, options = {}) => {
-  const cacheKey = generateSvgCacheKey(asciimath, 'asciimath', options);
+  // Remove scale from options for cache key since it's applied during rendering
+  const cacheOptions = { ...options };
+  if ("scale" in cacheOptions) {
+    delete cacheOptions.scale;
+  }
   
-  let cached = svgCache.get(cacheKey);
+  const cacheKey = generateSvgCacheKey(asciimath, 'asciimath', cacheOptions);
+  
+  let cached = getFromSVGCache(cacheKey);
   if (!cached) {
     await mathJaxReady;
-    const svgNode = await MathJax.asciimath2svgPromise(asciimath, options);
+    const svgNode = await MathJax.asciimath2svgPromise(asciimath, cacheOptions);
     const chunks = extractSvgChunks(svgNode);
     
     cached = { chunks, count: chunks.length };
-    svgCache.set(cacheKey, cached);
+    svgCacheSet(cacheKey, cached);
   }
   
   return cached.count;
@@ -649,16 +711,22 @@ const getSvgCountForAM = async (asciimath, options = {}) => {
  * @returns {Promise<number>} Promise that resolves to the number of SVG chunks
  */
 const getSvgCountForMathML = async (mathml, options = {}) => {
-  const cacheKey = generateSvgCacheKey(mathml, 'mathml', options);
+  // Remove scale from options for cache key since it's applied during rendering
+  const cacheOptions = { ...options };
+  if ("scale" in cacheOptions) {
+    delete cacheOptions.scale;
+  }
   
-  let cached = svgCache.get(cacheKey);
+  const cacheKey = generateSvgCacheKey(mathml, 'mathml', cacheOptions);
+  
+  let cached = getFromSVGCache(cacheKey);
   if (!cached) {
     await mathJaxReady;
-    const svgNode = await MathJax.mathml2svgPromise(mathml, options);
+    const svgNode = await MathJax.mathml2svgPromise(mathml, cacheOptions);
     const chunks = extractSvgChunks(svgNode);
     
     cached = { chunks, count: chunks.length };
-    svgCache.set(cacheKey, cached);
+    svgCacheSet(cacheKey, cached);
   }
   
   return cached.count;
@@ -676,20 +744,23 @@ const getSvgCountForMathML = async (mathml, options = {}) => {
  */
 const svgFromTeX = async (tex, options = {}, fgColor, chunkIndex = 0) => {
   const scale = options.scale || 1;
-  if ("scale" in options) {
-    delete options.scale;
+  
+  // Remove scale from options for cache key since it's applied during rendering
+  const cacheOptions = { ...options };
+  if ("scale" in cacheOptions) {
+    delete cacheOptions.scale;
   }
 
-  const cacheKey = generateSvgCacheKey(tex, 'tex', options);
-  let cached = svgCache.get(cacheKey);
+  const cacheKey = generateSvgCacheKey(tex, 'tex', cacheOptions);
+  let cached = getFromSVGCache(cacheKey);
   
   if (!cached) {
     await ensureMathJaxReady(tex);
-    const svgNode = await MathJax.tex2svgPromise(tex, options);
+    const svgNode = await MathJax.tex2svgPromise(tex, cacheOptions);
     const chunks = extractSvgChunks(svgNode);
     
     cached = { chunks, count: chunks.length };
-    svgCache.set(cacheKey, cached);
+    svgCacheSet(cacheKey, cached);
   }
   
   if (chunkIndex === 0) {
@@ -724,20 +795,23 @@ const svgFromTeX = async (tex, options = {}, fgColor, chunkIndex = 0) => {
  */
 const svgFromAM = async (asciimath, options = {}, fgColor, chunkIndex = 0) => {
   const scale = options.scale || 1;
-  if ("scale" in options) {
-    delete options.scale;
+  
+  // Remove scale from options for cache key since it's applied during rendering
+  const cacheOptions = { ...options };
+  if ("scale" in cacheOptions) {
+    delete cacheOptions.scale;
   }
 
-  const cacheKey = generateSvgCacheKey(asciimath, 'asciimath', options);
-  let cached = svgCache.get(cacheKey);
+  const cacheKey = generateSvgCacheKey(asciimath, 'asciimath', cacheOptions);
+  let cached = getFromSVGCache(cacheKey);
   
   if (!cached) {
     await mathJaxReady;
-    const svgNode = await MathJax.asciimath2svgPromise(asciimath, options);
+    const svgNode = await MathJax.asciimath2svgPromise(asciimath, cacheOptions);
     const chunks = extractSvgChunks(svgNode);
     
     cached = { chunks, count: chunks.length };
-    svgCache.set(cacheKey, cached);
+    svgCacheSet(cacheKey, cached);
   }
   
   if (chunkIndex === 0) {
@@ -772,20 +846,23 @@ const svgFromAM = async (asciimath, options = {}, fgColor, chunkIndex = 0) => {
  */
 const svgFromMathML = async (mathml, options = {}, fgColor, chunkIndex = 0) => {
   const scale = options.scale || 1;
-  if ("scale" in options) {
-    delete options.scale;
+  
+  // Remove scale from options for cache key since it's applied during rendering
+  const cacheOptions = { ...options };
+  if ("scale" in cacheOptions) {
+    delete cacheOptions.scale;
   }
 
-  const cacheKey = generateSvgCacheKey(mathml, 'mathml', options);
-  let cached = svgCache.get(cacheKey);
+  const cacheKey = generateSvgCacheKey(mathml, 'mathml', cacheOptions);
+  let cached = getFromSVGCache(cacheKey);
   
   if (!cached) {
     await mathJaxReady;
-    const svgNode = await MathJax.mathml2svgPromise(mathml, options);
+    const svgNode = await MathJax.mathml2svgPromise(mathml, cacheOptions);
     const chunks = extractSvgChunks(svgNode);
     
     cached = { chunks, count: chunks.length };
-    svgCache.set(cacheKey, cached);
+    svgCacheSet(cacheKey, cached);
   }
   
   if (chunkIndex === 0) {
